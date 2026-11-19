@@ -78,6 +78,7 @@ public class BusinessAndListingService {
         List<Business> visibleBusinesses = allOwnedOrAdmin.stream()
                 .filter(b -> !"INDIVIDUAL_JOB_SEEKER".equalsIgnoreCase(b.getProfileType()))
                 .toList();
+        enrichOwnerFullNames(visibleBusinesses);
         List<Long> bizIds = visibleBusinesses.stream().map(Business::getId).toList();
 
         List<CustomerOrder> scopedOrders = bizIds.isEmpty() ? List.of() : orderRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds);
@@ -139,6 +140,7 @@ public class BusinessAndListingService {
         biz.setLivenessVerified(true);
 
         Business saved = businessRepo.save(biz);
+        saved.setOwnerFullName(resolveUserProfileName(account, reg, saved.getBusinessName()));
         userSyncService.grantRoleToUid(principal.uid(), "BUSINESS_OWNER");
 
         AuditLog log = new AuditLog();
@@ -245,6 +247,7 @@ public class BusinessAndListingService {
                                 && "JOB_SEEKER".equalsIgnoreCase(l.getListingType()))
                         .toList();
 
+        enrichOwnerFullNames(seekerProfiles);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("profile", seekerProfiles.isEmpty() ? null : seekerProfiles.get(0));
         out.put("listings", myAds);
@@ -255,9 +258,10 @@ public class BusinessAndListingService {
     public Map<String, Object> publishJobSeekerAd(UserPrincipal principal, JobSeekerAdvertiseRequest req) {
         UserAccount account = userRepo.findByUid(principal.uid())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User profile not found."));
+        ProviderRegistration reg = providerRepo.findFirstByUserUidOrderByUpdatedAtDesc(principal.uid()).orElse(null);
 
         Long categoryId = resolveJobSeekerCategoryId(req.categoryId());
-        String displayName = nonBlank(account.getFullName(), principal.email(), "Individual Job Seeker");
+        String displayName = resolveUserProfileName(account, reg, nonBlank(principal.email(), null, "Individual Job Seeker"));
         String phone = nonBlank(req.phoneNumber(), account.getPhoneNumber(), "+251 900 000 000");
         String subCity = nonBlank(req.subCity(), account.getDefaultSubCity(), "Addis Ababa");
         String landmark = nonBlank(req.landmark(), subCity, "Addis Ababa");
@@ -295,6 +299,7 @@ public class BusinessAndListingService {
             seekerBiz.setOpeningHours("Flexible Availability");
         }
         Business savedBiz = businessRepo.save(seekerBiz);
+        savedBiz.setOwnerFullName(displayName);
 
         List<String> sanitizedImages = sanitizeImageUrls(req.imageUrls(), null);
         if (sanitizedImages.size() > 5) {
@@ -613,5 +618,35 @@ public class BusinessAndListingService {
         if (first != null && !first.isBlank()) return first.trim();
         if (second != null && !second.isBlank()) return second.trim();
         return fallback;
+    }
+
+    private String resolveUserProfileName(UserAccount account, ProviderRegistration reg, String fallback) {
+        if (account != null && account.getFullName() != null && !account.getFullName().isBlank()
+                && !"Nearest You User".equalsIgnoreCase(account.getFullName().trim())) {
+            return account.getFullName().trim();
+        }
+        if (reg != null && reg.getFullName() != null && !reg.getFullName().isBlank()) {
+            return reg.getFullName().trim();
+        }
+        if (account != null && account.getFullName() != null && !account.getFullName().isBlank()) {
+            return account.getFullName().trim();
+        }
+        return fallback;
+    }
+
+    private void enrichOwnerFullNames(List<Business> businesses) {
+        if (businesses == null || businesses.isEmpty()) return;
+        Map<String, UserAccount> userMap = new HashMap<>();
+        for (UserAccount ua : userRepo.findAll()) {
+            if (ua.getUid() != null) userMap.put(ua.getUid(), ua);
+            if (ua.getFirebaseUid() != null) userMap.putIfAbsent(ua.getFirebaseUid(), ua);
+        }
+        for (Business b : businesses) {
+            UserAccount acc = b.getOwnerUid() != null ? userMap.get(b.getOwnerUid()) : null;
+            ProviderRegistration reg = b.getOwnerUid() != null
+                    ? providerRepo.findFirstByUserUidOrderByUpdatedAtDesc(b.getOwnerUid()).orElse(null)
+                    : null;
+            b.setOwnerFullName(resolveUserProfileName(acc, reg, b.getBusinessName()));
+        }
     }
 }

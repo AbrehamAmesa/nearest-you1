@@ -10,9 +10,27 @@ const SERVICE_GIVER_TYPES = new Set([
 ]);
 
 /**
+ * Extracts the advertiser's personal name from their User Profile (`ownerFullName`),
+ * falling back to `businessName` only when a separate user profile name is unavailable.
+ */
+export function getAdvertiserProfileName(
+  business?: Pick<Business, 'ownerFullName' | 'businessName'> | null
+): string {
+  const profileName = business?.ownerFullName?.trim();
+  if (profileName && profileName.toLowerCase() !== 'nearest you user') {
+    return profileName;
+  }
+  const bizName = business?.businessName?.trim();
+  if (bizName) {
+    return bizName;
+  }
+  return 'Service Giver';
+}
+
+/**
  * Service givers (including individual job seekers advertising themselves) display their
- * name publicly on discovery cards, recommendations, and listing previews.
- * Other sellers (retail products, food, rentals, employer job ads) hide their seller name
+ * user profile name publicly on discovery cards, recommendations, and listing previews.
+ * Other sellers (retail products, food, rentals, employer job ads) hide their name
  * publicly and display it at message / order communication time only.
  */
 export function isServiceGiverOrJobSeeker(
@@ -28,15 +46,32 @@ export function isServiceGiverOrJobSeeker(
 
 export function getPublicProviderLabel(
   listing?: Pick<Listing, 'listingType'> | null,
-  business?: Pick<Business, 'businessName' | 'profileType'> | null
+  business?: Pick<Business, 'ownerFullName' | 'businessName' | 'profileType'> | null
 ): string {
-  if (isServiceGiverOrJobSeeker(listing, business) && business?.businessName) {
-    return business.businessName;
+  if (isServiceGiverOrJobSeeker(listing, business)) {
+    return getAdvertiserProfileName(business);
   }
   const type = (listing?.listingType || '').toUpperCase();
   if (type === 'JOB') return 'Verified Employer';
   if (type === 'RENTAL') return 'Verified Property Host';
   return 'Verified Seller';
+}
+
+export function getMessageTimeProviderLabel(
+  listing?: Pick<Listing, 'listingType'> | null,
+  business?: Pick<Business, 'ownerFullName' | 'businessName' | 'profileType'> | null
+): string {
+  const profileName = getAdvertiserProfileName(business);
+  const bizName = business?.businessName?.trim();
+  if (
+    bizName &&
+    bizName !== profileName &&
+    business?.profileType !== 'INDIVIDUAL_JOB_SEEKER' &&
+    listing?.listingType !== 'JOB_SEEKER'
+  ) {
+    return `${profileName} (${bizName})`;
+  }
+  return profileName;
 }
 
 export function getPublicProviderRoleLabel(

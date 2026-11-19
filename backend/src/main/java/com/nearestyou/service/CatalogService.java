@@ -44,6 +44,7 @@ public class CatalogService {
     private final ReviewRepository reviewRepo;
     private final PlatformSettingRepository settingRepo;
     private final ProviderRegistrationRepository providerRepo;
+    private final UserAccountRepository userRepo;
     private final GeoDistanceService geoDistanceService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -66,6 +67,7 @@ public class CatalogService {
             ReviewRepository reviewRepo,
             PlatformSettingRepository settingRepo,
             ProviderRegistrationRepository providerRepo,
+            UserAccountRepository userRepo,
             GeoDistanceService geoDistanceService
     ) {
         this.categoryRepo = categoryRepo;
@@ -76,6 +78,7 @@ public class CatalogService {
         this.reviewRepo = reviewRepo;
         this.settingRepo = settingRepo;
         this.providerRepo = providerRepo;
+        this.userRepo = userRepo;
         this.geoDistanceService = geoDistanceService;
     }
 
@@ -187,6 +190,7 @@ public class CatalogService {
         List<Business> allBusinesses = businessRepo.findAllByOrderByIdAsc().stream()
                 .filter(b -> "APPROVED".equalsIgnoreCase(b.getVerificationStatus()))
                 .toList();
+        enrichBusinessesWithOwnerProfiles(allBusinesses);
         List<ServiceListing> activeListings = listingRepo.findByStatusOrderByCreatedAtDesc("ACTIVE");
         List<Review> recentReviews = reviewRepo.findAllByOrderByCreatedAtDesc();
         List<PlatformSetting> settings = settingRepo.findAll();
@@ -257,6 +261,7 @@ public class CatalogService {
         List<Business> approvedBusinesses = businessRepo.findAllByOrderByIdAsc().stream()
                 .filter(b -> "APPROVED".equalsIgnoreCase(b.getVerificationStatus()))
                 .toList();
+        enrichBusinessesWithOwnerProfiles(approvedBusinesses);
         List<ServiceListing> activeListings = listingRepo.findByStatusOrderByCreatedAtDesc("ACTIVE");
 
         List<Map<String, Object>> recommendations = computeRecommendations(
@@ -299,6 +304,7 @@ public class CatalogService {
         }
 
         List<Business> allBusinesses = businessRepo.findAllByOrderByIdAsc();
+        enrichBusinessesWithOwnerProfiles(allBusinesses);
         Map<Long, Business> bizMap = new HashMap<>();
         for (Business b : allBusinesses) {
             bizMap.put(b.getId(), b);
@@ -336,6 +342,7 @@ public class CatalogService {
                         safeStr(listing.getPricingModel()),
                         safeStr(listing.getPricingUnit()),
                         extractSearchableMetadataText(listing.getMetadata()),
+                        safeStr(biz.getOwnerFullName()),
                         safeStr(biz.getBusinessName()),
                         safeStr(biz.getDescription()),
                         safeStr(biz.getSubCity()),
@@ -469,6 +476,7 @@ public class CatalogService {
 
         String categoryHintLower = safeStr((String) analysis.get("categoryHint")).toLowerCase(Locale.ROOT);
         List<Business> allBusinesses = businessRepo.findAllByOrderByIdAsc();
+        enrichBusinessesWithOwnerProfiles(allBusinesses);
         Map<Long, Business> bizMap = new HashMap<>();
         for (Business b : allBusinesses) {
             bizMap.put(b.getId(), b);
@@ -517,6 +525,7 @@ public class CatalogService {
                     safeStr(listing.getDescription()),
                     safeStr(listing.getListingType()),
                     extractSearchableMetadataText(listing.getMetadata()),
+                    safeStr(biz.getOwnerFullName()),
                     safeStr(biz.getBusinessName()),
                     safeStr(biz.getSubCity()),
                     safeStr(biz.getLandmark()),
@@ -1106,6 +1115,49 @@ public class CatalogService {
             }
         }
         return sb.toString();
+    }
+
+    private void enrichBusinessesWithOwnerProfiles(Collection<Business> businesses) {
+        if (businesses == null || businesses.isEmpty()) return;
+
+        Map<String, String> userNamesByUid = new HashMap<>();
+        for (UserAccount account : userRepo.findAll()) {
+            String fullName = safeStr(account.getFullName()).trim();
+            if (fullName.isEmpty()) continue;
+            if (account.getUid() != null && !account.getUid().isBlank()) {
+                userNamesByUid.put(account.getUid(), fullName);
+            }
+            if (account.getFirebaseUid() != null && !account.getFirebaseUid().isBlank()) {
+                userNamesByUid.putIfAbsent(account.getFirebaseUid(), fullName);
+            }
+        }
+
+        Map<String, String> regNamesByUid = new HashMap<>();
+        for (ProviderRegistration reg : providerRepo.findAllByOrderByUpdatedAtDesc()) {
+            String regName = safeStr(reg.getFullName()).trim();
+            if (!regName.isEmpty() && reg.getUserUid() != null && !reg.getUserUid().isBlank()) {
+                regNamesByUid.putIfAbsent(reg.getUserUid(), regName);
+            }
+        }
+
+        for (Business b : businesses) {
+            if (b == null) continue;
+            String ownerUid = safeStr(b.getOwnerUid()).trim();
+            String userFullName = ownerUid.isEmpty() ? "" : safeStr(userNamesByUid.get(ownerUid)).trim();
+            String regFullName = ownerUid.isEmpty() ? "" : safeStr(regNamesByUid.get(ownerUid)).trim();
+
+            String resolved = null;
+            if (!userFullName.isEmpty() && !"Nearest You User".equalsIgnoreCase(userFullName)) {
+                resolved = userFullName;
+            } else if (!regFullName.isEmpty()) {
+                resolved = regFullName;
+            } else if (!userFullName.isEmpty()) {
+                resolved = userFullName;
+            } else if (b.getBusinessName() != null && !b.getBusinessName().isBlank()) {
+                resolved = b.getBusinessName().trim();
+            }
+            b.setOwnerFullName(resolved);
+        }
     }
 
     private String safeStr(String s) {

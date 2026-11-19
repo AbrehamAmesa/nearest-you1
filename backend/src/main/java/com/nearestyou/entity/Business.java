@@ -90,6 +90,9 @@ public class Business {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
+    @Transient
+    private String ownerFullName;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -167,4 +170,7 @@ public class Business {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public String getOwnerFullName() { return ownerFullName; }
+    public void setOwnerFullName(String ownerFullName) { this.ownerFullName = ownerFullName; }
 }

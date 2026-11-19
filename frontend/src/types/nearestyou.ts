@@ -149,6 +149,7 @@ export interface LiveProviderPublicMarker {
 export interface Business {
   id: number;
   ownerUid: string;
+  ownerFullName?: string | null;
   providerRegistrationId: number | null;
   businessName: string;
   description: string;

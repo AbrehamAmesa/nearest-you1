@@ -400,7 +400,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
             .filter(Boolean)
             .join(' ');
           const hay =
-            `${item.title} ${item.description} ${metaText} ${item.listingType} ${item.pricingModel} ${item.pricingUnit} ${biz.businessName} ${biz.description} ${biz.subCity} ${biz.woreda} ${biz.landmark} ${biz.licenseNumber} ${cat?.name || ''} ${cat?.nameAm || ''} ${getCategoryLabel(cat, 'om')}`.toLowerCase();
+            `${item.title} ${item.description} ${metaText} ${item.listingType} ${item.pricingModel} ${item.pricingUnit} ${biz.ownerFullName || ''} ${biz.businessName} ${biz.description} ${biz.subCity} ${biz.woreda} ${biz.landmark} ${biz.licenseNumber} ${cat?.name || ''} ${cat?.nameAm || ''} ${getCategoryLabel(cat, 'om')}`.toLowerCase();
           if (!matchesSearchTokens(hay, q)) return false;
         }
         return true;
@@ -787,7 +787,13 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                         </p>
                       )}
                       {showProviderName && (
-                        <p className="truncate text-[11px] text-[#172B3A]/60">{business.subCity}</p>
+                        <p className="truncate text-[11px] text-[#172B3A]/60">
+                          {business.businessName &&
+                          business.businessName !== providerLabel &&
+                          business.profileType !== 'INDIVIDUAL_JOB_SEEKER'
+                            ? `${business.businessName} · ${business.subCity}`
+                            : business.subCity}
+                        </p>
                       )}
                       {reason && (
                         <p className="mt-0.5 truncate text-[10px] font-medium text-[#176B52]/85">
@@ -1275,6 +1281,11 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                                 <span className="truncate">
                                   {providerRole ? `${providerRole}: ` : ''}
                                   {providerLabel}
+                                  {biz.businessName &&
+                                  biz.businessName !== providerLabel &&
+                                  biz.profileType !== 'INDIVIDUAL_JOB_SEEKER'
+                                    ? ` · ${biz.businessName}`
+                                    : ''}
                                 </span>
                               </p>
                             ) : (

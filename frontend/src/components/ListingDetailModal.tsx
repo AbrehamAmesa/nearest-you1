@@ -29,6 +29,8 @@ import {
   readFileAsDataUrl,
 } from '../utils/media.ts';
 import {
+  getAdvertiserProfileName,
+  getMessageTimeProviderLabel,
   getPublicProviderLabel,
   getPublicProviderRoleLabel,
   isServiceGiverOrJobSeeker,
@@ -254,7 +256,9 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const showProviderName = isServiceGiverOrJobSeeker(listing, business);
   const providerLabel = getPublicProviderLabel(listing, business);
   const providerRole = getPublicProviderRoleLabel(listing, business);
-  const headerProviderLabel = showProviderName || isOwner ? business.businessName : providerLabel;
+  const advertiserProfileName = getAdvertiserProfileName(business);
+  const messageTimeLabel = getMessageTimeProviderLabel(listing, business);
+  const headerProviderLabel = showProviderName || isOwner ? advertiserProfileName : providerLabel;
 
   const handleBookOrReserve = async () => {
     if (isOwner) {
@@ -645,7 +649,14 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                 {(showProviderName || isOwner) && (
                   <>
                     <span>·</span>
-                    <span className="font-semibold text-[#172B3A]">{business.businessName}</span>
+                    <span className="font-semibold text-[#172B3A]">
+                      {advertiserProfileName}
+                      {business.businessName &&
+                      business.businessName !== advertiserProfileName &&
+                      !isJobSeeker
+                        ? ` (${business.businessName})`
+                        : ''}
+                    </span>
                   </>
                 )}
                 {!isJobSeeker && (showProviderName || isOwner) && (
@@ -1287,8 +1298,8 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                             recipientUid={business.ownerUid}
                             title={
                               isJobSeeker
-                                ? `Contact & Live Chat · ${business.businessName}`
-                                : `Contact & Write Message · ${business.businessName}`
+                                ? `Contact & Live Chat · ${advertiserProfileName}`
+                                : `Contact & Write Message · ${messageTimeLabel}`
                             }
                             maskedTitle="Contact & Write Message"
                             revealTitleOnMessage={!showProviderName}
@@ -1296,7 +1307,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                             placeholder="Write a message to contact or reply..."
                             onMessageSent={(text) =>
                               onMessageDelivered?.({
-                                recipientLabel: business.businessName,
+                                recipientLabel: messageTimeLabel,
                                 preview: text,
                               })
                             }
@@ -1598,7 +1609,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                         businessId={business.id}
                         listingId={listing.id}
                         recipientUid={business.ownerUid}
-                        title={`Live Chat · ${business.businessName}`}
+                        title={`Live Chat · ${messageTimeLabel}`}
                         maskedTitle={isJob ? 'Message Employer' : 'Message Seller'}
                         revealTitleOnMessage={!showProviderName}
                         subtitle={
@@ -1609,7 +1620,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                         placeholder="Write a message to contact or reply..."
                         onMessageSent={(text) =>
                           onMessageDelivered?.({
-                            recipientLabel: business.businessName,
+                            recipientLabel: messageTimeLabel,
                             preview: text,
                           })
                         }

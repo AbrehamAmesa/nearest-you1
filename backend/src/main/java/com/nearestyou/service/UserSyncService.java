@@ -4,8 +4,10 @@ import com.nearestyou.dto.NearestYouDtos.ChangePasswordRequest;
 import com.nearestyou.dto.NearestYouDtos.LoginRequest;
 import com.nearestyou.dto.NearestYouDtos.RegisterRequest;
 import com.nearestyou.dto.NearestYouDtos.UpdateProfileRequest;
+import com.nearestyou.entity.Business;
 import com.nearestyou.entity.UserAccount;
 import com.nearestyou.exception.ApiException;
+import com.nearestyou.repository.BusinessRepository;
 import com.nearestyou.repository.UserAccountRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -20,14 +22,17 @@ import java.util.*;
 public class UserSyncService {
 
     private final UserAccountRepository userRepo;
+    private final BusinessRepository businessRepo;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final Set<String> superAdminEmails = new HashSet<>();
 
     public UserSyncService(
             UserAccountRepository userRepo,
+            BusinessRepository businessRepo,
             @Value("${nearestyou.auth.super-admin-emails:abrehamamesw@gmail.com,admin@nearestyou.et}") String superAdmins
     ) {
         this.userRepo = userRepo;
+        this.businessRepo = businessRepo;
         for (String email : superAdmins.split(",")) {
             if (!email.isBlank()) {
                 this.superAdminEmails.add(email.trim().toLowerCase(Locale.ROOT));
@@ -174,7 +179,17 @@ public class UserSyncService {
         UserAccount user = userRepo.findByUid(uid)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User profile not found."));
         user.setPasswordHash(passwordEncoder.encode(rawPassword));
-        return userRepo.save(user);
+        UserAccount saved = userRepo.save(user);
+        if (req.fullName() != null && !req.fullName().isBlank()) {
+            String nextName = req.fullName().trim();
+            for (Business biz : businessRepo.findByOwnerUidOrderByIdAsc(uid)) {
+                if ("INDIVIDUAL_JOB_SEEKER".equalsIgnoreCase(biz.getProfileType())) {
+                    biz.setBusinessName(nextName);
+                    businessRepo.save(biz);
+                }
+            }
+        }
+        return saved;
     }
 
     @Transactional
