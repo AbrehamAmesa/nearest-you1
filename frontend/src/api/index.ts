@@ -112,7 +112,21 @@ export const adminApi = {
 };
 
 // OpenStreetMap / OSRM public services (not Spring controller endpoints)
-const geoApi = axios.create({ timeout: 15000, headers: { 'Accept-Language': 'en' } });
+const geoApi = axios.create({ timeout: 30000, headers: { 'Accept-Language': 'en' } });
+geoApi.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    const isTimeoutOrNetwork =
+      error?.code === 'ECONNABORTED' ||
+      error?.code === 'ETIMEDOUT' ||
+      error?.code === 'ERR_NETWORK' ||
+      /timeout/i.test(String(error?.message || ''));
+    if (isTimeoutOrNetwork) {
+      error.message = 'Connection error while reaching map service. Please try again.';
+    }
+    return Promise.reject(error);
+  }
+);
 export const mapsApi = {
   searchPlaces: async (query: string) => {
     const q = query.trim() ? `${query.trim()}, Addis Ababa, Ethiopia` : 'Addis Ababa, Ethiopia';

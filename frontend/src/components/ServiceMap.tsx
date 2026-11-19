@@ -8,6 +8,7 @@ import type {
   LiveProviderPublicMarker,
 } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
+import { getPublicProviderLabel } from '../utils/sellerDisplay.ts';
 
 function createDivPin(color: string, borderColor: string, innerHtml: string, size = 30) {
   return L.divIcon({
@@ -89,7 +90,7 @@ export const ServiceDiscoveryMap: React.FC<ServiceDiscoveryMapProps> = ({
         return {
           key: `biz-${biz.id}`,
           kind: 'BUSINESS',
-          title: biz.businessName,
+          title: getPublicProviderLabel(featured, biz),
           subtitle: cat?.name || 'Verified Service',
           lat,
           lng,

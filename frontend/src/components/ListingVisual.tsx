@@ -147,7 +147,7 @@ export const ListingVisual: React.FC<ListingVisualProps> = ({
             alt={`${title} (${idx + 1}/${slides.length})`}
             referrerPolicy="no-referrer"
             onError={() => handleMarkFailed(src)}
-            className={`absolute inset-0 h-full w-full object-cover transition-all duration-500 ${
+            className={`absolute inset-0 h-full w-full object-cover object-[50%_20%] transition-all duration-500 ${
               idx === currentIdx
                 ? 'opacity-100 scale-100 group-hover:scale-[1.02]'
                 : 'opacity-0 pointer-events-none scale-[1.01]'

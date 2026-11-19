@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { Business, Listing } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
 import { formatPricingModelLabel } from '../utils/i18n.ts';
+import { getPublicProviderLabel } from '../utils/sellerDisplay.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
 interface CompareDrawerProps {
@@ -91,7 +92,7 @@ export const CompareDrawer: React.FC<CompareDrawerProps> = ({
                     const biz = businessesMap.get(item.businessId);
                     return (
                       <td key={item.id} className="px-4 py-3 text-[#172B3A]">
-                        {biz?.businessName || 'Verified Provider'} ·{' '}
+                        {getPublicProviderLabel(item, biz)} ·{' '}
                         {biz?.verificationStatus === 'APPROVED' ? 'Verified' : 'Pending'}
                       </td>
                     );

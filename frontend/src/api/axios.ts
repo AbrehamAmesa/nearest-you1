@@ -8,7 +8,7 @@ export const setApiTokenProvider = (provider: () => Promise<string | null>) => {
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '',
   headers: { 'Content-Type': 'application/json' },
-  timeout: 30000,
+  timeout: 90000,
 });
 
 api.interceptors.request.use(async (config) => {
@@ -22,6 +22,16 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    const isTimeoutOrNetwork =
+      error?.code === 'ECONNABORTED' ||
+      error?.code === 'ETIMEDOUT' ||
+      error?.code === 'ERR_NETWORK' ||
+      /timeout/i.test(String(error?.message || '')) ||
+      (!error?.response && /network error/i.test(String(error?.message || '')));
+
+    if (isTimeoutOrNetwork) {
+      error.message = 'Connection error. Unable to reach the server right now. Please try again.';
+    }
     console.error('API Error:', error.response?.data || error.message);
     return Promise.reject(error);
   }

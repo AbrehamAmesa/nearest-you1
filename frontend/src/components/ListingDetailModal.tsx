@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Star,
   Upload,
+  User,
   Video,
   X,
 } from 'lucide-react';
@@ -27,6 +28,11 @@ import {
   MAX_PRODUCT_IMAGES,
   readFileAsDataUrl,
 } from '../utils/media.ts';
+import {
+  getPublicProviderLabel,
+  getPublicProviderRoleLabel,
+  isServiceGiverOrJobSeeker,
+} from '../utils/sellerDisplay.ts';
 import { businessApi } from '../api/index.ts';
 import { ListingVisual } from './ListingVisual.tsx';
 import { LiveChatPanel } from './LiveChatPanel.tsx';
@@ -42,6 +48,7 @@ interface ListingDetailModalProps {
   onClose: () => void;
   onAddToCart: (listing: Listing, business: Business, variant?: string) => void;
   onActionSuccess: (message: string) => void;
+  onMessageDelivered?: (info: { recipientLabel: string; preview: string }) => void;
   onListingUpdated?: (updated: Listing) => void;
 }
 
@@ -55,6 +62,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   onClose,
   onAddToCart,
   onActionSuccess,
+  onMessageDelivered,
   onListingUpdated,
 }) => {
   const { firebaseUser, dbUser, openAuthModal, authFetch } = useAuth();
@@ -142,6 +150,17 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
     setEditCvFileName(listing.metadata?.cvFileName || '');
     setEditCompanyLogoUrl(listing.metadata?.companyLogoUrl || '');
   }, [listing, initialEditMode, isOwner]);
+
+  useEffect(() => {
+    if (!listing) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [listing, onClose]);
 
   const formulaEstimate = useMemo(() => {
     if (!listing) return { breakdown: [], total: 0 };
@@ -232,6 +251,10 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const isWorkforceOrSeeker = isJobSeeker || isServiceDelivering || isEvent;
   const isNegotiable = listing.isUnpaid && Number(listing.basePrice) === 0;
   const contactThreadKey = `contact:${business.id}:${listing.id}:${dbUser?.uid || firebaseUser?.uid || 'guest'}`;
+  const showProviderName = isServiceGiverOrJobSeeker(listing, business);
+  const providerLabel = getPublicProviderLabel(listing, business);
+  const providerRole = getPublicProviderRoleLabel(listing, business);
+  const headerProviderLabel = showProviderName || isOwner ? business.businessName : providerLabel;
 
   const handleBookOrReserve = async () => {
     if (isOwner) {
@@ -455,10 +478,27 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
       >
         <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-[#172B3A]/10 bg-white px-4 py-3 sm:px-6 sm:py-4">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs text-[#172B3A]/60">
-              {business.businessName} · {business.subCity} · {distKm} km away
-            </p>
-            <h2 className="truncate font-display text-base font-bold text-[#172B3A] sm:text-xl">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#172B3A]/65">
+              {(showProviderName || isOwner) && (
+                <span className="inline-flex items-center gap-1 font-semibold text-[#176B52]">
+                  <User className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{headerProviderLabel}</span>
+                </span>
+              )}
+              {!showProviderName && !isOwner && (
+                <span className="font-medium text-[#172B3A]/70">{headerProviderLabel}</span>
+              )}
+              {providerRole && (
+                <span className="rounded bg-[#176B52]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#176B52]">
+                  {providerRole}
+                </span>
+              )}
+              <span>·</span>
+              <span>{business.subCity}</span>
+              <span>·</span>
+              <span className="font-mono tabular-nums">{distKm} km away</span>
+            </div>
+            <h2 className="mt-0.5 truncate font-display text-base font-bold text-[#172B3A] sm:text-xl">
               {listing.title}
             </h2>
           </div>
@@ -467,7 +507,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
               <button
                 type="button"
                 onClick={() => setEditMode((prev) => !prev)}
-                className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition sm:h-10 ${
+                className={`inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition sm:h-10 ${
                   editMode
                     ? 'border border-[#172B3A]/20 bg-[#F4F6F5] text-[#172B3A]'
                     : 'bg-[#176B52] text-white hover:bg-[#125641]'
@@ -488,35 +528,37 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
           </div>
         </div>
 
-        <div className="grid gap-5 p-4 sm:gap-8 sm:p-6 lg:grid-cols-12">
-          <div className="min-w-0 space-y-5 sm:space-y-6 lg:col-span-6">
+        <div className="grid gap-5 p-4 sm:gap-7 sm:p-6 lg:grid-cols-12">
+          <div className="min-w-0 space-y-5 sm:space-y-6 lg:col-span-5">
             {(() => {
               const gallery = getListingImages(listing);
               const youtubeEmbed = getYouTubeEmbedUrl(listing.metadata?.introVideoUrl);
               return (
                 <>
-                  <ListingVisual
-                    imageUrl={listing.imageUrl}
-                    imageUrls={listing.imageUrls}
-                    companyLogoUrl={listing.metadata?.companyLogoUrl}
-                    introVideoUrl={listing.metadata?.introVideoUrl}
-                    cvUrl={listing.metadata?.cvUrl}
-                    title={listing.title}
-                    listingType={listing.listingType}
-                    className="h-52 w-full rounded-xl sm:h-64"
-                    showSlideControls={gallery.length > 1}
-                    activeSlideIndex={galleryIndex}
-                    onSlideChange={setGalleryIndex}
-                  />
+                  <div className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/80 p-3 sm:p-4">
+                    <ListingVisual
+                      imageUrl={listing.imageUrl}
+                      imageUrls={listing.imageUrls}
+                      companyLogoUrl={listing.metadata?.companyLogoUrl}
+                      introVideoUrl={listing.metadata?.introVideoUrl}
+                      cvUrl={listing.metadata?.cvUrl}
+                      title={listing.title}
+                      listingType={listing.listingType}
+                      className="mx-auto aspect-[3/4] w-full max-w-[260px] rounded-xl border border-[#172B3A]/10 shadow-xs sm:max-w-[290px]"
+                      showSlideControls={gallery.length > 1}
+                      activeSlideIndex={galleryIndex}
+                      onSlideChange={setGalleryIndex}
+                    />
+                  </div>
 
                   {gallery.length > 1 && (
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                    <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
                       {gallery.map((src, idx) => (
                         <button
                           key={`${src.slice(0, 32)}-${idx}`}
                           type="button"
                           onClick={() => setGalleryIndex(idx)}
-                          className={`h-14 overflow-hidden rounded-lg border transition-all ${
+                          className={`aspect-[3/4] overflow-hidden rounded-lg border transition-all ${
                             idx === galleryIndex % gallery.length
                               ? 'border-[#176B52] ring-2 ring-[#176B52]/30'
                               : 'border-[#172B3A]/15 opacity-75 hover:opacity-100'
@@ -525,7 +567,8 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                           <img
                             src={src}
                             alt={`${listing.title} thumbnail ${idx + 1}`}
-                            className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
+                            className="h-full w-full object-cover object-[50%_20%]"
                           />
                         </button>
                       ))}
@@ -591,11 +634,21 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                   <ShieldCheck className="h-3.5 w-3.5" />
                   {isJobSeeker
                     ? 'Individual Job Seeker'
-                    : business.verificationStatus === 'APPROVED'
-                      ? 'Verified Business'
-                      : business.verificationStatus}
+                    : showProviderName
+                      ? business.verificationStatus === 'APPROVED'
+                        ? 'Verified Service Giver'
+                        : business.verificationStatus
+                      : business.verificationStatus === 'APPROVED'
+                        ? providerLabel
+                        : business.verificationStatus}
                 </span>
-                {!isJobSeeker && (
+                {(showProviderName || isOwner) && (
+                  <>
+                    <span>·</span>
+                    <span className="font-semibold text-[#172B3A]">{business.businessName}</span>
+                  </>
+                )}
+                {!isJobSeeker && (showProviderName || isOwner) && (
                   <>
                     <span>·</span>
                     <span className="break-words">License {business.licenseNumber}</span>
@@ -626,9 +679,15 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                 </div>
               )}
               <p className="mt-2 break-words text-xs text-[#172B3A]/60">
-                Location: {business.landmark}, {business.subCity} · Contact: {business.contactPhone} ·{' '}
-                Hours: {business.openingHours}
+                Location: {business.landmark}, {business.subCity}
+                {(showProviderName || isOwner) && ` · Contact: ${business.contactPhone}`} · Hours:{' '}
+                {business.openingHours}
               </p>
+              {!showProviderName && !isOwner && (
+                <p className="mt-1.5 text-[11px] font-medium text-[#176B52]">
+                  Seller identity is revealed when you start a message or place an order.
+                </p>
+              )}
             </div>
 
             {listing.pricingFormula?.factors && (
@@ -643,21 +702,6 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                     </li>
                   ))}
                 </ul>
-              </div>
-            )}
-
-            {!isOwner && !isServiceDelivering && (
-              <div className="min-w-0 border-t border-[#172B3A]/10 pt-4">
-                <LiveChatPanel
-                  compact
-                  threadKey={contactThreadKey}
-                  businessId={business.id}
-                  listingId={listing.id}
-                  recipientUid={business.ownerUid}
-                  title={`Live Chat · ${business.businessName}`}
-                  subtitle="Write a message below for instant replies"
-                  placeholder="Write a message to contact or reply..."
-                />
               </div>
             )}
 
@@ -680,7 +724,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
           </div>
 
           {/* Right Contiguous Module: Owner View/Edit OR Customer Contact & Transaction */}
-          <div className="min-w-0 lg:col-span-6">
+          <div className="min-w-0 lg:col-span-7">
             <div className="min-w-0 space-y-4 rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/60 p-3.5 sm:space-y-5 sm:p-5">
               <div className="border-b border-[#172B3A]/10 pb-4">
                 <p className="text-xs font-medium text-[#172B3A]/60">
@@ -1044,16 +1088,17 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                           </div>
                         </div>
                         {editImages.length > 0 && (
-                          <div className="grid grid-cols-3 gap-2 pt-1 sm:grid-cols-5">
+                          <div className="grid grid-cols-4 gap-2 pt-1 sm:grid-cols-5">
                             {editImages.map((src, idx) => (
                               <div
                                 key={`${src.slice(0, 24)}-${idx}`}
-                                className="relative h-14 overflow-hidden rounded-lg border border-[#172B3A]/15"
+                                className="relative aspect-[3/4] overflow-hidden rounded-lg border border-[#172B3A]/15"
                               >
                                 <img
                                   src={src}
                                   alt={`Edit preview ${idx + 1}`}
-                                  className="h-full w-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                  className="h-full w-full object-cover object-[50%_20%]"
                                 />
                                 <button
                                   type="button"
@@ -1245,8 +1290,16 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                                 ? `Contact & Live Chat · ${business.businessName}`
                                 : `Contact & Write Message · ${business.businessName}`
                             }
+                            maskedTitle="Contact & Write Message"
+                            revealTitleOnMessage={!showProviderName}
                             subtitle={`${formatPricingModelLabel(listing.pricingModel)} · Instant WebSocket replies`}
                             placeholder="Write a message to contact or reply..."
+                            onMessageSent={(text) =>
+                              onMessageDelivered?.({
+                                recipientLabel: business.businessName,
+                                preview: text,
+                              })
+                            }
                           />
                           <button
                             type="button"
@@ -1534,6 +1587,33 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                   {errorMsg && (
                     <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700 break-words">
                       {errorMsg}
+                    </div>
+                  )}
+
+                  {!isServiceDelivering && (
+                    <div className="min-w-0 border-t border-[#172B3A]/10 pt-4">
+                      <LiveChatPanel
+                        compact
+                        threadKey={contactThreadKey}
+                        businessId={business.id}
+                        listingId={listing.id}
+                        recipientUid={business.ownerUid}
+                        title={`Live Chat · ${business.businessName}`}
+                        maskedTitle={isJob ? 'Message Employer' : 'Message Seller'}
+                        revealTitleOnMessage={!showProviderName}
+                        subtitle={
+                          !showProviderName
+                            ? 'Seller name is revealed when you send a message'
+                            : 'Write a message below for instant replies'
+                        }
+                        placeholder="Write a message to contact or reply..."
+                        onMessageSent={(text) =>
+                          onMessageDelivered?.({
+                            recipientLabel: business.businessName,
+                            preview: text,
+                          })
+                        }
+                      />
                     </div>
                   )}
                 </>

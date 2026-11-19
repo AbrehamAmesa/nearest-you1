@@ -12,10 +12,13 @@ interface LiveChatPanelProps {
   bookingId?: number | null;
   recipientUid?: string | null;
   title?: string;
+  maskedTitle?: string;
+  revealTitleOnMessage?: boolean;
   subtitle?: string;
   placeholder?: string;
   compact?: boolean;
   onClose?: () => void;
+  onMessageSent?: (text: string) => void;
   onMessageSentOrReceived?: (msg: ChatMessage) => void;
 }
 
@@ -27,10 +30,13 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   bookingId,
   recipientUid,
   title = 'Live Chat',
+  maskedTitle,
+  revealTitleOnMessage = false,
   subtitle,
   placeholder = 'Write a message to reply...',
   compact = false,
   onClose,
+  onMessageSent,
   onMessageSentOrReceived,
 }) => {
   const { dbUser, firebaseUser, openAuthModal } = useAuth();
@@ -69,8 +75,13 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     const ok = await sendMessage(text);
     if (!ok) {
       setDraft(text);
+    } else {
+      onMessageSent?.(text.trim());
     }
   };
+
+  const displayHeaderTitle =
+    revealTitleOnMessage && messages.length === 0 && maskedTitle ? maskedTitle : title;
 
   if (!dbUser) {
     return (
@@ -110,7 +121,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <MessageSquare className="h-4 w-4 shrink-0 text-emerald-300" />
-            <h4 className="truncate text-xs font-bold sm:text-sm">{title}</h4>
+            <h4 className="truncate text-xs font-bold sm:text-sm">{displayHeaderTitle}</h4>
           </div>
           {subtitle && (
             <p className="mt-0.5 truncate text-[11px] text-slate-300">{subtitle}</p>

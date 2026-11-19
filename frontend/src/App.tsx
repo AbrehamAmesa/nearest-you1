@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { TopBar, type AppSection } from './components/TopBar.tsx';
 import { CustomerDiscoverView } from './components/CustomerDiscoverView.tsx';
@@ -13,6 +12,12 @@ import { ListingDetailModal } from './components/ListingDetailModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { AccountProfileModal } from './components/AccountProfileModal.tsx';
 import { JobSeekerAdvertiseModal } from './components/JobSeekerAdvertiseModal.tsx';
+import {
+  NotificationCenter,
+  type AppNotification,
+  type NotificationKind,
+} from './components/NotificationCenter.tsx';
+import { useLiveChatInboxListener } from './hooks/useLiveChat.ts';
 import type { AppLanguage } from './utils/i18n.ts';
 import { catalogApi, engagementApi, userApi } from './api/index.ts';
 import type {
@@ -119,14 +124,76 @@ function NearestYouWorkspace() {
   const [jobSeekerModalOpen, setJobSeekerModalOpen] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [listingInitialEditMode, setListingInitialEditMode] = useState(false);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  const notify = useCallback((msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => {
-      setToastMsg((prev) => (prev === msg ? null : prev));
-    }, 4500);
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((item) => item.id !== id));
   }, []);
+
+  const pushNotification = useCallback(
+    (
+      input:
+        | string
+        | {
+            kind?: NotificationKind;
+            title?: string;
+            message: string;
+            actionLabel?: string;
+            onAction?: () => void;
+          }
+    ) => {
+      const rawMessage = typeof input === 'string' ? input : input.message;
+      const inferredKind: NotificationKind =
+        typeof input !== 'string' && input.kind
+          ? input.kind
+          : /connection error|failed|cannot|unable|unavailable/i.test(rawMessage)
+            ? 'error'
+            : /message|chat|reply/i.test(rawMessage)
+              ? 'message'
+              : /offer|quote|proposal|order|booking|request|application|reserve/i.test(rawMessage)
+                ? 'offer'
+                : 'success';
+
+      const defaultTitle =
+        inferredKind === 'message'
+          ? 'Message Delivered'
+          : inferredKind === 'offer'
+            ? 'Offer & Request Delivered'
+            : inferredKind === 'error'
+              ? 'Connection Notice'
+              : 'Update';
+
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timestamp = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      const entry: AppNotification = {
+        id,
+        kind: inferredKind,
+        title: (typeof input !== 'string' && input.title) || defaultTitle,
+        message: rawMessage,
+        timestamp,
+        actionLabel: typeof input !== 'string' ? input.actionLabel : undefined,
+        onAction: typeof input !== 'string' ? input.onAction : undefined,
+      };
+
+      setNotifications((prev) => [...prev.slice(-3), entry]);
+
+      window.setTimeout(() => {
+        setNotifications((prev) => prev.filter((item) => item.id !== id));
+      }, 6500);
+    },
+    []
+  );
+
+  const notify = useCallback(
+    (msg: string) => {
+      pushNotification(msg);
+    },
+    [pushNotification]
+  );
 
   useEffect(() => {
     if (dbUser?.defaultSubCity) {
@@ -336,6 +403,31 @@ function NearestYouWorkspace() {
   const isVerifiedProvider =
     dbUser?.providerVerificationStatus === 'VERIFIED' || Boolean(dbUser?.isAdmin);
 
+  useLiveChatInboxListener(Boolean(firebaseUser && dbUser), (incomingMsg) => {
+    if (!dbUser?.uid || incomingMsg.senderUid === dbUser.uid) return;
+    const ownsBusiness = businesses.some(
+      (b) => b.id === incomingMsg.businessId && b.ownerUid === dbUser.uid
+    );
+    pushNotification({
+      kind: 'message',
+      title: `New Message · ${incomingMsg.senderName}`,
+      message:
+        incomingMsg.body.length > 96
+          ? `${incomingMsg.body.slice(0, 93)}...`
+          : incomingMsg.body,
+      actionLabel: 'Open Messages',
+      onAction: () => {
+        setSelectedListing(null);
+        if (ownsBusiness && isVerifiedProvider) {
+          setBusinessInitialTab('CATALOG');
+          setActiveSection('business');
+        } else {
+          setActiveSection('activity');
+        }
+      },
+    });
+  });
+
   const handleOpenJobSeekerAdvertise = () => {
     if (!firebaseUser) {
       openAuthModal('signin');
@@ -483,7 +575,13 @@ function NearestYouWorkspace() {
         subCityName={activeLocationLabel}
         policy={policy}
         onOrderSuccess={(refs) => {
-          notify(`Order confirmed: ${refs.join(', ')}`);
+          pushNotification({
+            kind: 'offer',
+            title: 'Offer & Order Delivered',
+            message: `Order confirmed: ${refs.join(', ')}`,
+            actionLabel: 'View Orders',
+            onAction: () => setActiveSection('activity'),
+          });
           setActiveSection('activity');
         }}
       />
@@ -515,6 +613,18 @@ function NearestYouWorkspace() {
         }}
         onAddToCart={handleAddToCart}
         onActionSuccess={notify}
+        onMessageDelivered={({ recipientLabel, preview }) => {
+          pushNotification({
+            kind: 'message',
+            title: `Message Delivered · ${recipientLabel}`,
+            message: preview.length > 90 ? `${preview.slice(0, 87)}...` : preview,
+            actionLabel: 'View Chat',
+            onAction: () => {
+              setSelectedListing(null);
+              setActiveSection('activity');
+            },
+          });
+        }}
         onListingUpdated={(updated) => {
           setSelectedListing(updated);
           setListings((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
@@ -557,22 +667,10 @@ function NearestYouWorkspace() {
         }}
       />
 
-      {toastMsg && (
-        <div
-          role="status"
-          className="fixed bottom-5 right-5 z-50 flex max-w-sm items-center gap-3 rounded-xl border border-[#172B3A]/15 bg-[#172B3A] px-4 py-3 text-xs font-medium text-white shadow-xl"
-        >
-          <span className="flex-1">{toastMsg}</span>
-          <button
-            type="button"
-            onClick={() => setToastMsg(null)}
-            aria-label="Dismiss notification"
-            className="text-white/70 hover:text-white"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
+      <NotificationCenter
+        notifications={notifications}
+        onDismiss={dismissNotification}
+      />
     </div>
   );
 }

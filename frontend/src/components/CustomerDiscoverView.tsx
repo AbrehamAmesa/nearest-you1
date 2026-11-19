@@ -19,6 +19,7 @@ import {
   SlidersHorizontal,
   SplitSquareHorizontal,
   Star,
+  User,
   X,
 } from 'lucide-react';
 import type {
@@ -38,6 +39,11 @@ import {
   TRANSLATIONS,
   type AppLanguage,
 } from '../utils/i18n.ts';
+import {
+  getPublicProviderLabel,
+  getPublicProviderRoleLabel,
+  isServiceGiverOrJobSeeker,
+} from '../utils/sellerDisplay.ts';
 import { catalogApi } from '../api/index.ts';
 import heroAddisMarketplaceImg from '../assets/images/hero_addis_marketplace_1794751692104.jpg';
 import { ImageSearchModal } from './ImageSearchModal.tsx';
@@ -725,6 +731,9 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
             {effectiveRecommendations.slice(0, 6).map(({ listing, business, category, distanceKm, reason }) => {
               const isOrderable = listing.listingType === 'PRODUCT' || listing.listingType === 'FOOD';
               const isOwnListing = Boolean(business.ownerUid && currentUids.has(business.ownerUid));
+              const showProviderName = isServiceGiverOrJobSeeker(listing, business);
+              const providerRole = getPublicProviderRoleLabel(listing, business);
+              const providerLabel = getPublicProviderLabel(listing, business);
               return (
                 <div
                   key={`rec-${listing.id}`}
@@ -733,7 +742,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onSelectListing(listing)}
-                    className="w-24 shrink-0 overflow-hidden rounded-lg text-left"
+                    className="w-24 sm:w-28 aspect-[3/4] shrink-0 overflow-hidden rounded-lg text-left"
                   >
                     <ListingVisual
                       imageUrl={listing.imageUrl}
@@ -743,7 +752,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                       cvUrl={listing.metadata?.cvUrl}
                       title={listing.title}
                       listingType={listing.listingType}
-                      className="h-full min-h-[92px] w-full"
+                      className="h-full w-full"
                     />
                   </button>
 
@@ -764,9 +773,22 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                       >
                         {listing.title}
                       </button>
-                      <p className="truncate text-[11px] text-[#172B3A]/65">
-                        {business.businessName} · {business.subCity}
-                      </p>
+                      {showProviderName ? (
+                        <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] font-semibold text-[#176B52]">
+                          <User className="h-3 w-3 shrink-0" />
+                          <span className="truncate">
+                            {providerRole ? `${providerRole}: ` : ''}
+                            {providerLabel}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="mt-0.5 truncate text-[11px] text-[#172B3A]/65">
+                          {providerLabel} · {business.subCity}
+                        </p>
+                      )}
+                      {showProviderName && (
+                        <p className="truncate text-[11px] text-[#172B3A]/60">{business.subCity}</p>
+                      )}
                       {reason && (
                         <p className="mt-0.5 truncate text-[10px] font-medium text-[#176B52]/85">
                           {reason}
@@ -1181,20 +1203,28 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {enrichedListings.map(({ item, biz, cat, distanceKm, visualImageMatch }) => {
                   const isCompared = compareIds.includes(item.id);
                   const isSaved = favoriteIds.includes(item.id);
                   const isOrderable = item.listingType === 'PRODUCT' || item.listingType === 'FOOD';
                   const isOwnListing = Boolean(biz.ownerUid && currentUids.has(biz.ownerUid));
+                  const showProviderName = isServiceGiverOrJobSeeker(item, biz);
+                  const providerRole = getPublicProviderRoleLabel(item, biz);
+                  const providerLabel = getPublicProviderLabel(item, biz);
 
                   return (
                     <article
                       key={item.id}
                       className="group flex min-w-0 flex-col justify-between overflow-hidden rounded-xl border border-[#172B3A]/10 bg-white transition-transform duration-150 hover:-translate-y-0.5 hover:shadow-md"
                     >
-                      <div>
-                        <div onClick={() => onSelectListing(item)} className="cursor-pointer">
+                      <div className="flex min-w-0 flex-1 items-stretch gap-3.5 p-4">
+                        {/* Portrait Thumbnail Matching Recommendation Layout */}
+                        <button
+                          type="button"
+                          onClick={() => onSelectListing(item)}
+                          className="w-28 sm:w-32 aspect-[3/4] shrink-0 overflow-hidden rounded-lg text-left"
+                        >
                           <ListingVisual
                             imageUrl={item.imageUrl}
                             imageUrls={item.imageUrls}
@@ -1203,88 +1233,104 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                             cvUrl={item.metadata?.cvUrl}
                             title={item.title}
                             listingType={item.listingType}
-                            className="h-52 w-full"
+                            className="h-full w-full"
                           />
-                        </div>
+                        </button>
 
-                        <div className="p-5">
-                          {/* Zero-Pill Metadata Line */}
-                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-[#172B3A]/60">
-                            <span className="font-medium text-[#176B52]">
-                              {item.listingType === 'JOB_SEEKER' ||
-                              biz.profileType === 'INDIVIDUAL_JOB_SEEKER'
-                                ? t.jobSeekerBadge
-                                : getCategoryLabel(cat, language, item.listingType)}
-                            </span>
-                            <span aria-hidden="true">·</span>
-                            <span>{biz.subCity}</span>
-                            <span aria-hidden="true">·</span>
-                            <span className="font-mono tabular-nums">{distanceKm} km</span>
-                            {biz.liveLocationActive && (
-                              <>
-                                <span aria-hidden="true">·</span>
-                                <span className="inline-flex items-center gap-1 font-medium text-[#176B52]">
-                                  <Radio className="h-3 w-3" />
-                                  {t.liveGps}
+                        <div className="flex min-w-0 flex-1 flex-col justify-between">
+                          <div className="min-w-0">
+                            {/* Zero-Pill Metadata Line */}
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[#172B3A]/60">
+                              <span className="font-semibold text-[#176B52]">
+                                {item.listingType === 'JOB_SEEKER' ||
+                                biz.profileType === 'INDIVIDUAL_JOB_SEEKER'
+                                  ? t.jobSeekerBadge
+                                  : getCategoryLabel(cat, language, item.listingType)}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-mono font-semibold tabular-nums text-[#172B3A]">
+                                {distanceKm} km
+                              </span>
+                              {biz.liveLocationActive && (
+                                <>
+                                  <span aria-hidden="true">·</span>
+                                  <span className="inline-flex items-center gap-1 font-medium text-[#176B52]">
+                                    <Radio className="h-3 w-3" />
+                                    {t.liveGps}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+
+                            <h3
+                              onClick={() => onSelectListing(item)}
+                              className="mt-1 cursor-pointer line-clamp-2 font-display text-base font-bold leading-snug text-[#172B3A] group-hover:text-[#176B52]"
+                            >
+                              {item.title}
+                            </h3>
+
+                            {showProviderName ? (
+                              <p className="mt-1 flex items-center gap-1 truncate text-xs font-semibold text-[#176B52]">
+                                <User className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">
+                                  {providerRole ? `${providerRole}: ` : ''}
+                                  {providerLabel}
                                 </span>
-                              </>
+                              </p>
+                            ) : (
+                              <p className="mt-1 truncate text-[11px] font-medium text-[#172B3A]/60">
+                                {providerLabel} · {biz.subCity}
+                              </p>
+                            )}
+
+                            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[#172B3A]/70">
+                              {item.description}
+                            </p>
+                            {item.metadata?.skills && (
+                              <p className="mt-1 truncate text-[11px] font-medium text-[#172B3A]/65">
+                                Skills: {item.metadata.skills}
+                              </p>
                             )}
                           </div>
 
-                          <h3
-                            onClick={() => onSelectListing(item)}
-                            className="mt-2 cursor-pointer font-display text-lg font-semibold text-[#172B3A] group-hover:text-[#176B52]"
-                          >
-                            {item.title}
-                          </h3>
-
-                          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[#172B3A]/70">
-                            {item.description}
-                          </p>
-                          {item.metadata?.skills && (
-                            <p className="mt-1 truncate text-[11px] font-medium text-[#172B3A]/65">
-                              Skills: {item.metadata.skills}
-                            </p>
-                          )}
-
                           {/* Mandatory Explicit Pricing Block */}
-                          <div className="mt-4 border-t border-[#172B3A]/10 pt-3">
-                            <div className="flex items-baseline justify-between gap-2">
-                              <div>
+                          <div className="mt-3 border-t border-[#172B3A]/10 pt-2.5">
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <div className="min-w-0">
                                 {item.isUnpaid && Number(item.basePrice) === 0 ? (
-                                  <span className="font-mono text-base font-bold text-[#176B52]">
+                                  <span className="font-mono text-sm font-bold text-[#176B52]">
                                     {t.negotiable}
                                   </span>
                                 ) : (
                                   <>
-                                    <span className="font-mono text-lg font-bold tabular-nums text-[#172B3A]">
+                                    <span className="font-mono text-base font-bold tabular-nums text-[#172B3A]">
                                       {formatEtb(item.discountPrice || item.basePrice)}
                                     </span>
-                                    <span className="ml-1 text-xs text-[#172B3A]/65">
+                                    <span className="ml-1 text-[11px] text-[#172B3A]/65">
                                       / {item.pricingUnit}
                                     </span>
                                   </>
                                 )}
                                 {item.discountPrice && (
-                                  <span className="ml-2 font-mono text-xs tabular-nums text-[#172B3A]/45 line-through">
+                                  <span className="ml-1.5 font-mono text-[11px] tabular-nums text-[#172B3A]/45 line-through">
                                     {formatEtb(item.basePrice)}
                                   </span>
                                 )}
                                 {item.salaryMax && (
-                                  <span className="ml-1 font-mono text-xs tabular-nums text-[#172B3A]/70">
+                                  <span className="ml-1 font-mono text-[11px] tabular-nums text-[#172B3A]/70">
                                     – {formatEtb(item.salaryMax)}
                                   </span>
                                 )}
                               </div>
 
-                              <span className="inline-flex items-center gap-1 font-mono text-xs tabular-nums text-[#172B3A]/75">
+                              <span className="inline-flex shrink-0 items-center gap-1 font-mono text-xs tabular-nums text-[#172B3A]/75">
                                 <Star className="h-3.5 w-3.5 fill-[#F4A62A] text-[#F4A62A]" />
                                 {Number(item.ratingAvg).toFixed(1)}
                               </span>
                             </div>
 
-                            <p className="mt-1 font-mono text-[11px] tabular-nums text-[#172B3A]/60">
-                              {biz.businessName} · {formatPricingModelLabel(item.pricingModel, language)} ·{' '}
+                            <p className="mt-1 truncate font-mono text-[11px] tabular-nums text-[#172B3A]/60">
+                              {biz.subCity} · {formatPricingModelLabel(item.pricingModel, language)} ·{' '}
                               {biz.profileType === 'INDIVIDUAL_JOB_SEEKER'
                                 ? biz.faydaVerified
                                   ? t.faydaLiveVerified
@@ -1304,8 +1350,8 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2 border-t border-[#172B3A]/10 bg-[#F4F6F5]/45 px-5 py-3">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between gap-2 border-t border-[#172B3A]/10 bg-[#F4F6F5]/45 px-4 py-2.5">
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => onToggleCompare(item.id)}

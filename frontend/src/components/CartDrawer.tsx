@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
 import type { CartItem, PlatformPolicy } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
+import { getPublicProviderLabel } from '../utils/sellerDisplay.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
 interface CartDrawerProps {
@@ -243,7 +244,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     <div className="flex items-baseline justify-between border-b border-[#172B3A]/10 pb-3">
                       <div>
                         <h3 className="text-sm font-semibold text-[#172B3A]">
-                          {group.business.businessName}
+                          {getPublicProviderLabel(group.items[0]?.listing, group.business)}
                         </h3>
                         <p className="text-xs text-[#172B3A]/60">
                           {group.business.subCity} · {group.distanceKm} km away
