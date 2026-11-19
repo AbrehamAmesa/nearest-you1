@@ -501,3 +501,35 @@ export interface ImageSearchResultItem {
   visualImageMatch?: boolean;
 }
 
+export interface ChatMessage {
+  id: number;
+  senderUid: string;
+  senderName: string;
+  senderRole?: 'CUSTOMER' | 'PROVIDER' | 'ADMIN' | string | null;
+  recipientUid?: string | null;
+  businessId: number;
+  listingId: number | null;
+  orderId?: number | null;
+  bookingId?: number | null;
+  threadKey?: string | null;
+  body: string;
+  createdAt: string;
+}
+
+export interface ChatThreadSummary {
+  threadKey: string;
+  threadType: 'ORDER' | 'BOOKING' | 'SERVICE_CONTACT' | string;
+  businessId: number;
+  businessName: string;
+  listingId: number | null;
+  listingTitle: string | null;
+  orderId: number | null;
+  orderNumber: string | null;
+  orderStatus: string | null;
+  bookingId: number | null;
+  bookingReference: string | null;
+  otherPartyUid: string | null;
+  otherPartyName: string | null;
+  messageCount: number;
+  lastMessage: ChatMessage;
+}

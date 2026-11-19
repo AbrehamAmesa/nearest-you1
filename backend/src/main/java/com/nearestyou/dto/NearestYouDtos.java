@@ -205,7 +205,15 @@ public final class NearestYouDtos {
 
     public record ToggleFavoriteRequest(@NotNull Long listingId) {}
 
-    public record SendMessageRequest(@NotNull Long businessId, Long listingId, @NotBlank String body) {}
+    public record SendMessageRequest(
+        Long businessId,
+        Long listingId,
+        Long orderId,
+        Long bookingId,
+        String threadKey,
+        String recipientUid,
+        @NotBlank String body
+    ) {}
 
     public record CreateDocumentTypeRequest(
         @NotBlank String documentName,

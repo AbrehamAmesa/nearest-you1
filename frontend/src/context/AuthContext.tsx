@@ -112,6 +112,7 @@ interface AuthContextValue {
   updateAccountPassword: (currentPassword: string, newPassword: string) => Promise<boolean>;
   linkEmailPassword: (newPassword: string) => Promise<boolean>;
   logout: () => Promise<void>;
+  getAccessToken: () => Promise<string | null>;
   authFetch: (
     url: string,
     options?: RequestInit
@@ -712,6 +713,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateAccountPassword,
         linkEmailPassword,
         logout,
+        getAccessToken: () => getActiveBearerToken(false),
         authFetch,
       }}
     >

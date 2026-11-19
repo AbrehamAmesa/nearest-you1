@@ -254,6 +254,87 @@ const server = http.createServer(async (req, res) => {
   res.end('<!doctype html><html><body><p>Starting Nearest You...</p></body></html>');
 });
 
+server.on('upgrade', (req, socket, head) => {
+  const reqUrl = req.url || '/';
+  const qIndex = reqUrl.indexOf('?');
+  const rawPathname = qIndex === -1 ? reqUrl : reqUrl.slice(0, qIndex);
+  if (
+    rawPathname !== '/api' &&
+    !rawPathname.startsWith('/api/') &&
+    !rawPathname.startsWith('/ws/')
+  ) {
+    socket.destroy();
+    return;
+  }
+
+  let targetUrl;
+  try {
+    targetUrl = new URL(reqUrl, apiProxyTarget);
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  const targetPort = Number(targetUrl.port) || (targetUrl.protocol === 'https:' ? 443 : 80);
+  const isLoopback = targetUrl.hostname === '127.0.0.1' || targetUrl.hostname === 'localhost';
+  if ((isLoopback && targetPort === port) || req.headers['x-ny-proxy-hop']) {
+    socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const transport = targetUrl.protocol === 'https:' ? https : http;
+  const headers = { ...req.headers };
+  headers.host = targetUrl.host;
+  headers['x-forwarded-host'] = req.headers.host || '';
+  headers['x-forwarded-proto'] = 'https';
+  headers['x-ny-proxy-hop'] = '1';
+
+  const proxyReq = transport.request(targetUrl, {
+    method: req.method || 'GET',
+    headers,
+  });
+
+  proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
+    let responseHead = `HTTP/1.1 ${proxyRes.statusCode || 101} ${proxyRes.statusMessage || 'Switching Protocols'}\r\n`;
+    for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
+      responseHead += `${proxyRes.rawHeaders[i]}: ${proxyRes.rawHeaders[i + 1]}\r\n`;
+    }
+    responseHead += '\r\n';
+    socket.write(responseHead);
+    if (proxyHead && proxyHead.length > 0) {
+      socket.write(proxyHead);
+    }
+    if (head && head.length > 0) {
+      proxySocket.write(head);
+    }
+    proxySocket.pipe(socket);
+    socket.pipe(proxySocket);
+
+    proxySocket.on('error', () => socket.destroy());
+    socket.on('error', () => proxySocket.destroy());
+    proxySocket.on('close', () => socket.end());
+    socket.on('close', () => proxySocket.end());
+  });
+
+  proxyReq.on('response', (proxyRes) => {
+    let responseHead = `HTTP/1.1 ${proxyRes.statusCode || 502} ${proxyRes.statusMessage || 'Bad Gateway'}\r\n`;
+    for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
+      responseHead += `${proxyRes.rawHeaders[i]}: ${proxyRes.rawHeaders[i + 1]}\r\n`;
+    }
+    responseHead += '\r\n';
+    socket.write(responseHead);
+    proxyRes.pipe(socket);
+  });
+
+  proxyReq.on('error', () => {
+    socket.write('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+  });
+
+  proxyReq.end();
+});
+
 server.on('error', (err) => {
   console.error('[server] HTTP server error:', err);
   process.exit(1);

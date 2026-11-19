@@ -287,9 +287,17 @@ public class OrderAndBookingService {
                 agreedPrice += deposit;
             }
         } else {
-            double units = Math.max(1, toDouble(params.get("units"), 1.0));
+            double units = ("ONE_TIME_CONTRACT".equalsIgnoreCase(listing.getPricingModel())
+                    || "FULL_TIME".equalsIgnoreCase(listing.getPricingModel()))
+                    ? Math.max(1, toDouble(params.get("units"), 1.0))
+                    : Math.max(1, toDouble(params.get("units"), 1.0));
             double svcAmt = units * base;
-            breakdown.add(Map.of("label", listing.getTitle() + " (" + units + " " + listing.getPricingUnit() + ")", "amount", svcAmt));
+            String unitLabel = switch (listing.getPricingModel() != null ? listing.getPricingModel().toUpperCase(Locale.ROOT) : "") {
+                case "ONE_TIME_CONTRACT" -> "One-Time Contract";
+                case "FULL_TIME" -> "Full-Time (" + (int) units + " " + listing.getPricingUnit() + ")";
+                default -> (int) units + " " + listing.getPricingUnit();
+            };
+            breakdown.add(Map.of("label", listing.getTitle() + " (" + unitLabel + ")", "amount", svcAmt));
             agreedPrice += svcAmt;
             if (callout > 0) {
                 breakdown.add(Map.of("label", "Call-out / inspection fee", "amount", callout));

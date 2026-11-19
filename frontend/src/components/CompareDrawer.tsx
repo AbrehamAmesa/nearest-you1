@@ -2,6 +2,7 @@ import React from 'react';
 import { X } from 'lucide-react';
 import type { Business, Listing } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
+import { formatPricingModelLabel } from '../utils/i18n.ts';
 
 interface CompareDrawerProps {
   open: boolean;
@@ -121,7 +122,7 @@ export const CompareDrawer: React.FC<CompareDrawerProps> = ({
                   <td className="py-3 pr-4 font-medium text-[#172B3A]/65">Pricing Model</td>
                   {listings.map((item) => (
                     <td key={item.id} className="px-4 py-3 text-[#172B3A]">
-                      {item.pricingModel.replace('_', ' ')}
+                      {formatPricingModelLabel(item.pricingModel)}
                     </td>
                   ))}
                 </tr>

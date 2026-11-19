@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { ExternalLink, FileText, MessageSquare, Play, ShieldCheck, Star, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, FileText, Play, ShieldCheck, Star, X } from 'lucide-react';
 import type { Business, Listing, ReviewItem } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
+import { formatPricingModelLabel } from '../utils/i18n.ts';
 import { getListingImages, getYouTubeEmbedUrl } from '../utils/media.ts';
 import { ListingVisual } from './ListingVisual.tsx';
+import { LiveChatPanel } from './LiveChatPanel.tsx';
 import { useAuth } from '../context/AuthContext.tsx';
 
 interface ListingDetailModalProps {
@@ -50,8 +52,8 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const [expectedComp, setExpectedComp] = useState(0);
   const [coverLetter, setCoverLetter] = useState('');
 
-  // Messaging state
-  const [msgText, setMsgText] = useState('');
+  // Service proposal / collapsible contract state
+  const [showServiceProposalForm, setShowServiceProposalForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -134,6 +136,16 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
     return true;
   };
 
+  const isCartItem = listing.listingType === 'PRODUCT' || listing.listingType === 'FOOD';
+  const isJob = listing.listingType === 'JOB';
+  const isRental = listing.listingType === 'RENTAL';
+  const isEvent = listing.listingType === 'EVENT';
+  const isJobSeeker =
+    listing.listingType === 'JOB_SEEKER' || business.profileType === 'INDIVIDUAL_JOB_SEEKER';
+  const isServiceDelivering = !isCartItem && !isJob && !isRental && !isEvent;
+  const isNegotiable = listing.isUnpaid && Number(listing.basePrice) === 0;
+  const contactThreadKey = `contact:${business.id}:${listing.id}:${dbUser?.uid || firebaseUser?.uid || 'guest'}`;
+
   const handleBookOrReserve = async () => {
     setErrorMsg(null);
     if (!(await ensureAuth())) return;
@@ -144,7 +156,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
         body: JSON.stringify({
           listingId: listing.id,
           scheduledDate,
-          endDate: listing.listingType === 'RENTAL' ? endDate : undefined,
+          endDate: isRental ? endDate : undefined,
           scheduledTime,
           parameters: { distanceKm, workers, areaSqm, units },
           paymentMethod,
@@ -152,11 +164,15 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Booking failed.');
-      onActionSuccess(`Booking ${data.bookingReference} confirmed for ${formatEtb(data.agreedPrice)}.`);
+      if (!res.ok) throw new Error(data.error || 'Request failed.');
+      onActionSuccess(
+        isServiceDelivering
+          ? `Service request ${data.bookingReference} sent (${formatEtb(data.agreedPrice)}).`
+          : `Booking ${data.bookingReference} confirmed for ${formatEtb(data.agreedPrice)}.`
+      );
       onClose();
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Unable to complete booking.');
+      setErrorMsg(err instanceof Error ? err.message : 'Unable to complete request.');
     } finally {
       setSubmitting(false);
     }
@@ -188,33 +204,6 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
       setSubmitting(false);
     }
   };
-
-  const handleSendMessage = async () => {
-    if (!msgText.trim()) return;
-    setErrorMsg(null);
-    if (!(await ensureAuth())) return;
-    try {
-      const res = await authFetch('/api/v1/messages', {
-        method: 'POST',
-        body: JSON.stringify({
-          businessId: business.id,
-          listingId: listing.id,
-          body: msgText.trim(),
-        }),
-      });
-      if (!res.ok) throw new Error('Message failed.');
-      setMsgText('');
-      onActionSuccess(`Message delivered to ${business.businessName}.`);
-    } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Message could not be sent.');
-    }
-  };
-
-  const isCartItem = listing.listingType === 'PRODUCT' || listing.listingType === 'FOOD';
-  const isJob = listing.listingType === 'JOB';
-  const isJobSeeker =
-    listing.listingType === 'JOB_SEEKER' || business.profileType === 'INDIVIDUAL_JOB_SEEKER';
-  const isNegotiable = listing.isUnpaid && Number(listing.basePrice) === 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#172B3A]/45 p-4 backdrop-blur-[2px]">
@@ -394,28 +383,20 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
               </div>
             )}
 
-            <div className="border-t border-[#172B3A]/10 pt-4">
-              <h3 className="flex items-center gap-2 text-xs font-semibold text-[#172B3A]">
-                <MessageSquare className="h-4 w-4 text-[#176B52]" />
-                Message {business.businessName}
-              </h3>
-              <div className="mt-2 flex gap-2">
-                <input
-                  type="text"
-                  value={msgText}
-                  onChange={(e) => setMsgText(e.target.value)}
-                  placeholder="Ask about availability, specs, or custom schedule..."
-                  className="flex-1 rounded-lg border border-[#172B3A]/15 px-3 py-2 text-xs focus:border-[#176B52] focus:outline-none"
+            {!isServiceDelivering && (
+              <div className="border-t border-[#172B3A]/10 pt-4">
+                <LiveChatPanel
+                  compact
+                  threadKey={contactThreadKey}
+                  businessId={business.id}
+                  listingId={listing.id}
+                  recipientUid={business.ownerUid}
+                  title={`Live Chat · ${business.businessName}`}
+                  subtitle="Write a message below for instant replies"
+                  placeholder="Write a message to contact or reply..."
                 />
-                <button
-                  type="button"
-                  onClick={handleSendMessage}
-                  className="rounded-lg border border-[#172B3A]/15 px-3 py-2 text-xs font-semibold text-[#172B3A] hover:bg-[#F4F6F5]"
-                >
-                  Send
-                </button>
               </div>
-            </div>
+            )}
 
             {listingReviews.length > 0 && (
               <div className="border-t border-[#172B3A]/10 pt-4">
@@ -440,7 +421,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
             <div className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/60 p-5 space-y-5">
               <div className="border-b border-[#172B3A]/10 pb-4">
                 <p className="text-xs font-medium text-[#172B3A]/60">
-                  {listing.pricingModel.replace('_', ' ')} · Currency: {listing.currency}
+                  {formatPricingModelLabel(listing.pricingModel)} · Currency: {listing.currency}
                 </p>
                 <div className="mt-1 flex items-baseline gap-3">
                   <span className="font-mono text-2xl font-bold tabular-nums text-[#176B52]">
@@ -516,6 +497,42 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
 
               {!isCartItem && !isJob && (
                 <div className="space-y-4">
+                  {isServiceDelivering && (
+                    <div className="space-y-3">
+                      <LiveChatPanel
+                        threadKey={contactThreadKey}
+                        businessId={business.id}
+                        listingId={listing.id}
+                        recipientUid={business.ownerUid}
+                        title={
+                          isJobSeeker
+                            ? `Contact & Live Chat · ${business.businessName}`
+                            : `Contact & Write Message · ${business.businessName}`
+                        }
+                        subtitle={`${formatPricingModelLabel(listing.pricingModel)} · Instant WebSocket replies`}
+                        placeholder="Write a message to contact or reply..."
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowServiceProposalForm((prev) => !prev)}
+                        className="flex w-full items-center justify-between rounded-lg border border-[#172B3A]/15 bg-white px-3.5 py-2.5 text-xs font-semibold text-[#172B3A] hover:bg-[#F4F6F5]"
+                      >
+                        <span>
+                          {isJobSeeker
+                            ? 'Send Formal Hire / Contract Proposal (Optional)'
+                            : 'Send Formal Service Request / Estimate (Optional)'}
+                        </span>
+                        {showServiceProposalForm ? (
+                          <ChevronUp className="h-4 w-4 text-[#176B52]" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 text-[#176B52]" />
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {(!isServiceDelivering || showServiceProposalForm) && (
+                    <div className="space-y-4">
                   {listing.pricingModel === 'CALCULATED' && listing.pricingFormula && (
                     <div className="space-y-3 rounded-lg border border-[#172B3A]/10 bg-white p-4">
                       <p className="text-xs font-semibold text-[#172B3A]">
@@ -682,17 +699,21 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                     className="w-full min-h-[44px] rounded-lg bg-[#176B52] px-5 py-3 text-sm font-semibold text-white hover:bg-[#125641] disabled:opacity-50"
                   >
                     {submitting
-                      ? 'Confirming...'
+                      ? 'Sending...'
                       : isJobSeeker
                         ? isNegotiable
-                          ? 'Hire / Contact Candidate (Negotiable)'
-                          : `Hire Candidate · ${formatEtb(formulaEstimate.total)}`
-                        : listing.isQuoteBased
-                          ? `Request Quote & Book · Est. ${formatEtb(formulaEstimate.total)}`
+                          ? 'Send Hire Proposal (Negotiable)'
+                          : `Send Hire Proposal · ${formatEtb(formulaEstimate.total)}`
+                        : isServiceDelivering
+                          ? listing.isQuoteBased
+                            ? `Send Service Quote Request · Est. ${formatEtb(formulaEstimate.total)}`
+                            : `Send Service Request · ${formatEtb(formulaEstimate.total)}`
                           : listing.listingType === 'RENTAL'
                             ? `Reserve Dates · ${formatEtb(formulaEstimate.total)}`
                             : `Confirm Booking · ${formatEtb(formulaEstimate.total)}`}
                   </button>
+                    </div>
+                  )}
                 </div>
               )}
 

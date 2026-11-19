@@ -68,7 +68,7 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
   const [availabilityNote, setAvailabilityNote] = useState('');
   const [negotiable, setNegotiable] = useState(false);
   const [expectedPay, setExpectedPay] = useState('500');
-  const [pricingUnit, setPricingUnit] = useState('PER_DAY');
+  const [pricingUnit, setPricingUnit] = useState('PER_HOUR');
   const [phoneNumber, setPhoneNumber] = useState(dbUser?.phoneNumber || '');
   const [subCity, setSubCity] = useState(
     detectedLocation.subCity || dbUser?.defaultSubCity || ADDIS_SUB_CITIES[0].name
@@ -203,6 +203,32 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
     }
 
     setSubmitting(true);
+    const resolvedPricingModel =
+      pricingUnit === 'ONE_TIME_CONTRACT'
+        ? 'ONE_TIME_CONTRACT'
+        : pricingUnit === 'FULL_TIME'
+          ? 'FULL_TIME'
+          : pricingUnit === 'PER_HOUR'
+            ? 'PER_HOUR'
+            : pricingUnit === 'PER_DAY'
+              ? 'PER_DAY'
+              : pricingUnit === 'PER_MONTH'
+                ? 'PER_MONTH'
+                : negotiable
+                  ? 'QUOTE'
+                  : 'FIXED';
+    const resolvedUnitLabel =
+      pricingUnit === 'ONE_TIME_CONTRACT'
+        ? 'contract'
+        : pricingUnit === 'FULL_TIME'
+          ? 'month (full-time)'
+          : pricingUnit === 'PER_HOUR'
+            ? 'hour'
+            : pricingUnit === 'PER_DAY'
+              ? 'day'
+              : pricingUnit === 'PER_MONTH'
+                ? 'month'
+                : 'job';
     try {
       await jobSeekerApi.advertise({
         categoryId,
@@ -211,8 +237,8 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
         skills: skills.trim() || undefined,
         experienceSummary: experienceSummary.trim() || undefined,
         availabilityNote: availabilityNote.trim() || undefined,
-        pricingModel: negotiable ? 'QUOTE' : 'FIXED',
-        pricingUnit,
+        pricingModel: resolvedPricingModel,
+        pricingUnit: resolvedUnitLabel,
         expectedPay: negotiable ? 0 : Number(expectedPay),
         negotiable,
         phoneNumber: phoneNumber.trim() || undefined,
@@ -388,8 +414,24 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
                 </label>
               </div>
 
-              {!negotiable && (
-                <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-[11px] text-[#172B3A]/70">
+                    Service Delivering / Engagement Type
+                  </label>
+                  <select
+                    value={pricingUnit}
+                    onChange={(e) => setPricingUnit(e.target.value)}
+                    className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-3 text-xs font-medium"
+                  >
+                    <option value="ONE_TIME_CONTRACT">One-Time Contract</option>
+                    <option value="FULL_TIME">Full-Time</option>
+                    <option value="PER_HOUR">Per Hour Payment</option>
+                    <option value="PER_DAY">Per Day</option>
+                    <option value="PER_MONTH">Per Month</option>
+                  </select>
+                </div>
+                {!negotiable && (
                   <div>
                     <label className="block text-[11px] text-[#172B3A]/70">Amount (ETB)</label>
                     <input
@@ -400,21 +442,8 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
                       className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-3 font-mono text-xs"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[11px] text-[#172B3A]/70">Rate Unit</label>
-                    <select
-                      value={pricingUnit}
-                      onChange={(e) => setPricingUnit(e.target.value)}
-                      className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-3 text-xs"
-                    >
-                      <option value="PER_DAY">Per Day</option>
-                      <option value="PER_HOUR">Per Hour</option>
-                      <option value="PER_MONTH">Per Month</option>
-                      <option value="PER_JOB">Per Job</option>
-                    </select>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">

@@ -9,6 +9,7 @@ import {
   FileText,
   ImagePlus,
   MapPin,
+  MessageSquare,
   Navigation,
   Plus,
   QrCode,
@@ -24,6 +25,7 @@ import type {
   Business,
   Category,
   CategoryDocumentRequirement,
+  ChatThreadSummary,
   CommissionRecord,
   JobApplicationRecord,
   Listing,
@@ -33,15 +35,24 @@ import type {
   ProviderRegistration,
 } from '../types/nearestyou.ts';
 import { ADDIS_SUB_CITIES, formatEtb } from '../utils/geo.ts';
-import { getCategoryLabel, getDocumentLabel, type AppLanguage } from '../utils/i18n.ts';
+import {
+  formatPricingModelLabel,
+  getCategoryLabel,
+  getDocumentLabel,
+  type AppLanguage,
+} from '../utils/i18n.ts';
 import {
   compressImageFile,
   extractYouTubeVideoId,
   MAX_PRODUCT_IMAGES,
   readFileAsDataUrl,
 } from '../utils/media.ts';
+import { engagementApi } from '../api/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
+import { useLiveChatInboxListener } from '../hooks/useLiveChat.ts';
 import { ListingVisual } from './ListingVisual.tsx';
+import { LiveChatDrawer, type ActiveChatTarget } from './LiveChatDrawer.tsx';
+import { LiveChatPanel } from './LiveChatPanel.tsx';
 import { ProviderOnboardingWizard } from './ProviderOnboardingWizard.tsx';
 import { RealtimeLocationPickerMap } from './ServiceMap.tsx';
 
@@ -52,6 +63,7 @@ type BusinessPortalTab =
   | 'CATALOG'
   | 'ORDERS'
   | 'BOOKINGS'
+  | 'MESSAGES'
   | 'RECRUITMENT'
   | 'REGISTER';
 
@@ -91,6 +103,9 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   const [commissions, setCommissions] = useState<CommissionRecord[]>([]);
   const [providerReg, setProviderReg] = useState<ProviderRegistration | null>(null);
   const [portalReqs, setPortalReqs] = useState<CategoryDocumentRequirement[]>(documentRequirements);
+  const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
+  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
+  const [chatDrawerTarget, setChatDrawerTarget] = useState<ActiveChatTarget | null>(null);
 
   // Real-time location broadcasting state
   const [pingingLocation, setPingingLocation] = useState(false);
@@ -162,15 +177,32 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     isAdmin || dbUser?.roles?.some((r) => governance.allowedApproverRoles.includes(r))
   );
 
+  const loadThreadsOnly = async () => {
+    if (!firebaseUser) return;
+    try {
+      const res = await engagementApi.getChatThreads();
+      const nextThreads: ChatThreadSummary[] = Array.isArray(res.data) ? res.data : [];
+      setThreads(nextThreads);
+      setSelectedThreadKey((prev) => prev || nextThreads[0]?.threadKey || null);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useLiveChatInboxListener(Boolean(firebaseUser), () => {
+    loadThreadsOnly();
+  });
+
   const loadPortalData = async () => {
     if (!firebaseUser) return;
     try {
-      const [portalRes, meRes] = await Promise.all([
+      const [portalRes, meRes, threadsRes] = await Promise.allSettled([
         authFetch('/api/v1/business/portal'),
         authFetch('/api/v1/auth/me'),
+        engagementApi.getChatThreads(),
       ]);
-      if (portalRes.ok) {
-        const data = await portalRes.json();
+      if (portalRes.status === 'fulfilled' && portalRes.value.ok) {
+        const data = await portalRes.value.json();
         setOwnedBusinesses(data.ownedBusinesses || []);
         setOrders(data.orders || []);
         setBookings(data.bookings || []);
@@ -181,11 +213,18 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
           setPortalReqs(data.documentRequirements);
         }
       }
-      if (meRes.ok) {
-        const meData = await meRes.json();
+      if (meRes.status === 'fulfilled' && meRes.value.ok) {
+        const meData = await meRes.value.json();
         if (meData.voucherEligibility) {
           setVoucherEligibility(meData.voucherEligibility);
         }
+      }
+      if (threadsRes.status === 'fulfilled') {
+        const nextThreads: ChatThreadSummary[] = Array.isArray(threadsRes.value.data)
+          ? threadsRes.value.data
+          : [];
+        setThreads(nextThreads);
+        setSelectedThreadKey((prev) => prev || nextThreads[0]?.threadKey || null);
       }
     } catch (err) {
       console.error(err);
@@ -697,7 +736,8 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     { id: 'REGISTER', label: 'Register Business' },
     { id: 'CATALOG', label: 'Catalog & Pricing' },
     { id: 'ORDERS', label: `Orders (${orders.length})` },
-    { id: 'BOOKINGS', label: `Bookings (${bookings.length})` },
+    { id: 'BOOKINGS', label: `Service Requests & Bookings (${bookings.length})` },
+    { id: 'MESSAGES', label: `Messages & Live Chat (${threads.length})` },
     { id: 'RECRUITMENT', label: `Applicants (${applications.length})` },
   ];
 
@@ -1217,19 +1257,33 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#172B3A]/75">Pricing Model</label>
+                <label className="block text-xs font-medium text-[#172B3A]/75">
+                  {isWorkforceMode ? 'Service Payment / Engagement Type' : 'Pricing Model'}
+                </label>
                 <select
                   value={pricingModel}
-                  onChange={(e) => setPricingModel(e.target.value)}
+                  onChange={(e) => {
+                    const nextModel = e.target.value;
+                    setPricingModel(nextModel);
+                    if (nextModel === 'ONE_TIME_CONTRACT') setPricingUnit('contract');
+                    else if (nextModel === 'FULL_TIME') setPricingUnit('month');
+                    else if (nextModel === 'PER_HOUR') setPricingUnit('hour');
+                    else if (nextModel === 'PER_DAY') setPricingUnit('day');
+                    else if (nextModel === 'PER_MONTH') setPricingUnit('month');
+                    else if (nextModel === 'PER_SESSION') setPricingUnit('session');
+                    else if (nextModel === 'PER_UNIT') setPricingUnit('item');
+                  }}
                   className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs"
                 >
-                  <option value="FIXED">Fixed</option>
-                  <option value="PER_UNIT">Per unit</option>
-                  <option value="PER_HOUR">Per hour</option>
-                  <option value="PER_DAY">Per day</option>
-                  <option value="PER_MONTH">Per month</option>
-                  <option value="PER_SESSION">Per session</option>
-                  <option value="CALCULATED">Calculated formula</option>
+                  <option value="ONE_TIME_CONTRACT">One-Time Contract</option>
+                  <option value="FULL_TIME">Full-Time</option>
+                  <option value="PER_HOUR">Per Hour Payment</option>
+                  <option value="PER_DAY">Per Day</option>
+                  <option value="PER_MONTH">Per Month</option>
+                  <option value="PER_SESSION">Per Session</option>
+                  <option value="FIXED">Fixed Price</option>
+                  <option value="PER_UNIT">Per Unit</option>
+                  <option value="CALCULATED">Calculated Formula</option>
                 </select>
               </div>
             </div>
@@ -1632,7 +1686,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                       </div>
                       <div className="flex items-center justify-between gap-2 pt-1">
                         <span className="text-[#172B3A]/70">
-                          {item.pricingModel} / {item.pricingUnit}
+                          {formatPricingModelLabel(item.pricingModel, language)} / {item.pricingUnit}
                         </span>
                         <button
                           type="button"
@@ -1693,7 +1747,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                             </div>
                           </td>
                           <td className="px-4 py-3 text-[#172B3A]/75">
-                            {item.pricingModel} / {item.pricingUnit}
+                            {formatPricingModelLabel(item.pricingModel, language)} / {item.pricingUnit}
                           </td>
                           <td className="px-4 py-3 font-mono font-semibold tabular-nums text-[#176B52]">
                             {formatEtb(item.discountPrice || item.basePrice)}
@@ -1740,6 +1794,23 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                     {o.customerName} · {o.deliveryAddress} · <strong>{o.orderStatus}</strong>
                   </p>
                   <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setChatDrawerTarget({
+                          threadKey: `order:${o.id}`,
+                          orderId: o.id,
+                          businessId: o.businessId,
+                          recipientUid: o.customerUid,
+                          title: `Order ${o.orderNumber} · Live Chat`,
+                          subtitle: o.customerName,
+                        })
+                      }
+                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded bg-[#176B52] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      Live Chat
+                    </button>
                     {['PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETED'].map((st) => (
                       <button
                         key={st}
@@ -1763,7 +1834,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                   <th className="px-4 py-3 font-semibold">Customer</th>
                   <th className="px-4 py-3 font-semibold">Total (ETB)</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold text-right">Fulfillment Action</th>
+                  <th className="px-4 py-3 font-semibold text-right">Fulfillment & Live Chat</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#172B3A]/10">
@@ -1784,17 +1855,36 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                         {formatEtb(o.totalAmount)}
                       </td>
                       <td className="px-4 py-3 font-semibold text-[#176B52]">{o.orderStatus}</td>
-                      <td className="px-4 py-3 text-right space-x-2">
-                        {['PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETED'].map((st) => (
+                      <td className="px-4 py-3 text-right">
+                        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
                           <button
-                            key={st}
                             type="button"
-                            onClick={() => handleUpdateOrderStatus(o.id, st)}
-                            className="rounded border border-[#172B3A]/15 px-2 py-1 text-[11px] font-medium hover:bg-[#F4F6F5]"
+                            onClick={() =>
+                              setChatDrawerTarget({
+                                threadKey: `order:${o.id}`,
+                                orderId: o.id,
+                                businessId: o.businessId,
+                                recipientUid: o.customerUid,
+                                title: `Order ${o.orderNumber} · Live Chat`,
+                                subtitle: o.customerName,
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded bg-[#176B52] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
                           >
-                            {st.replace(/_/g, ' ')}
+                            <MessageSquare className="h-3 w-3" />
+                            Live Chat
                           </button>
-                        ))}
+                          {['PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETED'].map((st) => (
+                            <button
+                              key={st}
+                              type="button"
+                              onClick={() => handleUpdateOrderStatus(o.id, st)}
+                              className="rounded border border-[#172B3A]/15 px-2 py-1 text-[11px] font-medium hover:bg-[#F4F6F5]"
+                            >
+                              {st.replace(/_/g, ' ')}
+                            </button>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1826,6 +1916,24 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
+                      onClick={() =>
+                        setChatDrawerTarget({
+                          threadKey: `booking:${b.id}`,
+                          bookingId: b.id,
+                          businessId: b.businessId,
+                          listingId: b.listingId,
+                          recipientUid: b.customerUid,
+                          title: `${b.bookingReference} · Live Chat`,
+                          subtitle: b.customerName,
+                        })
+                      }
+                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded bg-[#176B52] px-3 py-1.5 font-semibold text-white hover:bg-[#125641]"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      Live Chat
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleUpdateBooking(b.id, { bookingStatus: 'CONFIRMED' })}
                       className="min-h-[38px] rounded border border-[#172B3A]/15 px-3 py-1.5 font-medium"
                     >
@@ -1847,7 +1955,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                     <button
                       type="button"
                       onClick={() => handleUpdateBooking(b.id, { bookingStatus: 'COMPLETED' })}
-                      className="min-h-[38px] rounded bg-[#176B52] px-3 py-1.5 font-semibold text-white"
+                      className="min-h-[38px] rounded bg-[#172B3A] px-3 py-1.5 font-semibold text-white"
                     >
                       Complete
                     </button>
@@ -1860,18 +1968,18 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
             <table className="w-full min-w-[700px] text-left text-xs">
               <thead className="border-b border-[#172B3A]/10 bg-[#F4F6F5] text-[#172B3A]/70">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">Booking Ref</th>
+                  <th className="px-4 py-3 font-semibold">Reference</th>
                   <th className="px-4 py-3 font-semibold">Schedule</th>
                   <th className="px-4 py-3 font-semibold">Agreed Price</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                  <th className="px-4 py-3 font-semibold text-right">Actions & Live Chat</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#172B3A]/10">
                 {bookings.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-4 py-10 text-center text-[#172B3A]/60">
-                      No bookings or rental reservations yet.
+                      No service requests or bookings yet.
                     </td>
                   </tr>
                 ) : (
@@ -1885,40 +1993,156 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                         {formatEtb(b.agreedPrice)}
                       </td>
                       <td className="px-4 py-3 font-semibold text-[#176B52]">{b.bookingStatus}</td>
-                      <td className="px-4 py-3 text-right space-x-2">
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateBooking(b.id, { bookingStatus: 'CONFIRMED' })}
-                          className="rounded border border-[#172B3A]/15 px-2.5 py-1 font-medium hover:bg-[#F4F6F5]"
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleUpdateBooking(b.id, {
-                              bookingStatus: 'QUOTED',
-                              quotedPrice: Number(b.agreedPrice) + 250,
-                              quoteApproved: false,
-                            })
-                          }
-                          className="rounded border border-[#172B3A]/15 px-2.5 py-1 font-medium hover:bg-[#F4F6F5]"
-                        >
-                          Send +250 ETB Quote
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateBooking(b.id, { bookingStatus: 'COMPLETED' })}
-                          className="rounded bg-[#176B52] px-2.5 py-1 font-semibold text-white"
-                        >
-                          Complete
-                        </button>
+                      <td className="px-4 py-3 text-right">
+                        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setChatDrawerTarget({
+                                threadKey: `booking:${b.id}`,
+                                bookingId: b.id,
+                                businessId: b.businessId,
+                                listingId: b.listingId,
+                                recipientUid: b.customerUid,
+                                title: `${b.bookingReference} · Live Chat`,
+                                subtitle: b.customerName,
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded bg-[#176B52] px-2.5 py-1 font-semibold text-white hover:bg-[#125641]"
+                          >
+                            <MessageSquare className="h-3 w-3" />
+                            Live Chat
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateBooking(b.id, { bookingStatus: 'CONFIRMED' })}
+                            className="rounded border border-[#172B3A]/15 px-2.5 py-1 font-medium hover:bg-[#F4F6F5]"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUpdateBooking(b.id, {
+                                bookingStatus: 'QUOTED',
+                                quotedPrice: Number(b.agreedPrice) + 250,
+                                quoteApproved: false,
+                              })
+                            }
+                            className="rounded border border-[#172B3A]/15 px-2.5 py-1 font-medium hover:bg-[#F4F6F5]"
+                          >
+                            Send +250 ETB Quote
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateBooking(b.id, { bookingStatus: 'COMPLETED' })}
+                            className="rounded bg-[#172B3A] px-2.5 py-1 font-semibold text-white"
+                          >
+                            Complete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'MESSAGES' && (
+        <div className="grid gap-5 lg:grid-cols-12">
+          <div className="space-y-2 rounded-2xl border border-[#172B3A]/10 bg-white p-4 lg:col-span-5">
+            <div className="flex items-center justify-between border-b border-[#172B3A]/10 pb-2.5">
+              <h2 className="font-display text-sm font-bold text-[#172B3A]">
+                Client Inquiries & Order Live Chats ({threads.length})
+              </h2>
+              <button
+                type="button"
+                onClick={loadThreadsOnly}
+                className="text-xs font-semibold text-[#176B52] hover:underline"
+              >
+                Refresh
+              </button>
+            </div>
+            {threads.length === 0 ? (
+              <p className="py-10 text-center text-xs text-[#172B3A]/60">
+                No client messages or order chats yet. Incoming messages from customers appear here
+                automatically in real time.
+              </p>
+            ) : (
+              <div className="max-h-[440px] space-y-2 overflow-y-auto pr-1">
+                {threads.map((th) => {
+                  const active = selectedThreadKey === th.threadKey;
+                  return (
+                    <button
+                      key={th.threadKey}
+                      type="button"
+                      onClick={() => setSelectedThreadKey(th.threadKey)}
+                      className={`w-full rounded-lg border p-3 text-left transition ${
+                        active
+                          ? 'border-[#176B52] bg-emerald-50/60'
+                          : 'border-[#172B3A]/10 bg-[#F4F6F5]/50 hover:bg-[#F4F6F5]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-xs font-bold text-[#172B3A]">
+                          {th.otherPartyName || 'Client'}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] font-semibold text-[#176B52]">
+                          {th.orderNumber
+                            ? th.orderNumber
+                            : th.bookingReference
+                              ? th.bookingReference
+                              : 'CONTACT'}
+                        </span>
+                      </div>
+                      {th.listingTitle && (
+                        <p className="mt-0.5 truncate text-[11px] font-medium text-[#172B3A]/75">
+                          {th.listingTitle}
+                        </p>
+                      )}
+                      <p className="mt-1 line-clamp-1 text-[11px] text-[#172B3A]/65">
+                        {th.lastMessage?.senderName}: {th.lastMessage?.body}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="lg:col-span-7">
+            {(() => {
+              const selected =
+                threads.find((th) => th.threadKey === selectedThreadKey) || threads[0];
+              if (!selected) {
+                return (
+                  <div className="flex h-72 items-center justify-center rounded-2xl border border-[#172B3A]/10 bg-white p-8 text-center text-xs text-[#172B3A]/60">
+                    Select a client conversation on the left to write a reply.
+                  </div>
+                );
+              }
+              return (
+                <LiveChatPanel
+                  threadKey={selected.threadKey}
+                  businessId={selected.businessId}
+                  listingId={selected.listingId}
+                  orderId={selected.orderId}
+                  bookingId={selected.bookingId}
+                  recipientUid={selected.otherPartyUid}
+                  title={`Reply to ${selected.otherPartyName || 'Client'}`}
+                  subtitle={
+                    selected.orderNumber
+                      ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
+                      : selected.listingTitle || selected.businessName
+                  }
+                  placeholder="Write a message to reply..."
+                  onMessageSentOrReceived={() => loadThreadsOnly()}
+                />
+              );
+            })()}
           </div>
         </div>
       )}
@@ -2212,6 +2436,11 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
           </div>
         </div>
       )}
+      <LiveChatDrawer
+        target={chatDrawerTarget}
+        onClose={() => setChatDrawerTarget(null)}
+        onMessageReceived={() => loadThreadsOnly()}
+      />
     </div>
   );
 };

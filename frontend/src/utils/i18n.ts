@@ -41,6 +41,37 @@ export function getDocumentLabel(
   return doc.documentName;
 }
 
+export function formatPricingModelLabel(model?: string | null, lang: AppLanguage = 'en'): string {
+  const key = (model || '').toUpperCase();
+  const labels = TRANSLATIONS[lang]?.discover || TRANSLATIONS.en.discover;
+  switch (key) {
+    case 'ONE_TIME_CONTRACT':
+      return labels.oneTimeContract;
+    case 'FULL_TIME':
+      return labels.fullTime;
+    case 'PER_HOUR':
+      return labels.perHour;
+    case 'PER_DAY':
+      return 'Per Day';
+    case 'PER_MONTH':
+      return 'Per Month';
+    case 'PER_SESSION':
+      return 'Per Session';
+    case 'PER_UNIT':
+      return 'Per Unit';
+    case 'CALCULATED':
+      return 'Calculated Rate';
+    case 'FIXED':
+      return 'Fixed Price';
+    case 'NEGOTIABLE':
+      return labels.negotiable;
+    case 'SALARY_RANGE':
+      return 'Salary Range';
+    default:
+      return (model || 'FIXED').replace(/_/g, ' ');
+  }
+}
+
 interface Translations {
   nav: {
     discover: string;
@@ -134,6 +165,12 @@ interface Translations {
     jobSeekerBadge: string;
     hireContact: string;
     negotiable: string;
+    contactMessage: string;
+    liveChat: string;
+    writeReply: string;
+    oneTimeContract: string;
+    fullTime: string;
+    perHour: string;
   };
   delivery: {
     title: string;
@@ -192,7 +229,9 @@ interface Translations {
     tabBookings: string;
     tabDeliveries: string;
     tabJobs: string;
+    tabMessages: string;
     tabSaved: string;
+    liveChat: string;
     escrowHeld: string;
     pickupOtpHint: string;
     deliveryOtpHint: string;
@@ -324,8 +363,14 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       scanSelectedImage: 'Find Nearest Matches',
       advertiseSelf: 'Advertise Yourself (Job Seeker)',
       jobSeekerBadge: 'Individual Job Seeker',
-      hireContact: 'Hire / Contact',
+      hireContact: 'Contact & Message',
       negotiable: 'Negotiable',
+      contactMessage: 'Contact & Message',
+      liveChat: 'Live Chat',
+      writeReply: 'Write a message to reply...',
+      oneTimeContract: 'One-Time Contract',
+      fullTime: 'Full-Time',
+      perHour: 'Per Hour',
     },
     delivery: {
       title: 'Delivery & Transportation Dispatch',
@@ -389,7 +434,9 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       tabBookings: 'Bookings & Rentals',
       tabDeliveries: 'Deliveries & Escrow',
       tabJobs: 'Jobs',
+      tabMessages: 'Live Chat & Messages',
       tabSaved: 'Saved',
+      liveChat: 'Live Chat',
       escrowHeld: 'Escrow Protection',
       pickupOtpHint: 'Share with driver ONLY when handing over parcel:',
       deliveryOtpHint: 'Send privately to Receiver to unlock driver payout on arrival:',
@@ -520,8 +567,14 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       scanSelectedImage: 'ቅርብ አገልግሎቶችን ፈልግ',
       advertiseSelf: 'ራስዎን ያስተዋውቁ (ስራ ፈላጊ)',
       jobSeekerBadge: 'የግል ስራ ፈላጊ',
-      hireContact: 'ቅጠር / አግኝ',
+      hireContact: 'ያግኙ እና መልዕክት ይጻፉ',
       negotiable: 'በስምምነት',
+      contactMessage: 'ያግኙ እና መልዕክት ይጻፉ',
+      liveChat: 'ቀጥታ ውይይት (Live Chat)',
+      writeReply: 'ምላሽ ለመጻፍ መልዕክት ይጻፉ...',
+      oneTimeContract: 'የአንድ ጊዜ ኮንትራት',
+      fullTime: 'ሙሉ ጊዜ (Full-Time)',
+      perHour: 'በሰዓት (Per Hour)',
     },
     delivery: {
       title: 'የመላኪያ እና የትራንስፖርት ስምሪት',
@@ -581,7 +634,9 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       tabBookings: 'ቦታ ማስያዣ እና ኪራይ',
       tabDeliveries: 'መላኪያ እና ኤስክሮ',
       tabJobs: 'ስራዎች',
+      tabMessages: 'ቀጥታ ውይይት እና መልዕክቶች',
       tabSaved: 'የተቀመጡ',
+      liveChat: 'ቀጥታ ውይይት',
       escrowHeld: 'የኤስክሮ ጥበቃ',
       pickupOtpHint: 'እቃውን ሲያስረክቡ ለአሽከርካሪው ብቻ ይስጡት:',
       deliveryOtpHint: 'እቃው ሲደርስ ክፍያ እንዲለቀቅ ለተቀባዩ ብቻ ይላኩ:',
@@ -712,8 +767,14 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       scanSelectedImage: 'Tajaajila Dhiyoo Barbaadi',
       advertiseSelf: 'Of Beeksisi (Hojii Barbaadaa)',
       jobSeekerBadge: 'Hojii Barbaadaa Dhuunfaa',
-      hireContact: 'Qaxari / Quunnami',
+      hireContact: 'Quunnami & Ergaa Barreessi',
       negotiable: 'Mariidhaan',
+      contactMessage: 'Quunnami & Ergaa Barreessi',
+      liveChat: 'Marii Kallattii (Live Chat)',
+      writeReply: 'Deebii barreessuuf ergaa galchi...',
+      oneTimeContract: 'Kiraa / Kontiraata Yeroo Tokkoo',
+      fullTime: 'Yeroo Guutuu (Full-Time)',
+      perHour: 'Sa’aatiin (Per Hour)',
     },
     delivery: {
       title: 'Ergamaa fi Geejjiba Taksii',
@@ -777,7 +838,9 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       tabBookings: 'Qabannaa fi Kireessaa',
       tabDeliveries: 'Ergaa fi Eeskroo',
       tabJobs: 'Hojiiwwan',
+      tabMessages: 'Marii Kallattii & Ergaawwan',
       tabSaved: 'Kuufaman',
+      liveChat: 'Marii Kallattii',
       escrowHeld: 'Eegumsa Eeskroo',
       pickupOtpHint: 'Yeroo mi’a kennitu qofa konkolaachisaatti himi:',
       deliveryOtpHint: 'Kaffaltiin akka gadhiifamu fudhataatti qofa ergi:',

@@ -33,6 +33,7 @@ import type {
 } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
 import {
+  formatPricingModelLabel,
   getCategoryLabel,
   TRANSLATIONS,
   type AppLanguage,
@@ -779,9 +780,13 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                       >
                         {isOrderable
                           ? t.addToCart
-                          : listing.listingType === 'JOB_SEEKER'
-                            ? t.hireContact
-                            : t.bookNow}
+                          : listing.listingType === 'JOB'
+                            ? t.viewApply
+                            : listing.listingType === 'RENTAL'
+                              ? t.reserveDates
+                              : listing.listingType === 'EVENT'
+                                ? t.bookNow
+                                : t.contactMessage}
                       </button>
                     </div>
                   </div>
@@ -946,13 +951,15 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                     className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-2.5 text-xs"
                   >
                     <option value="ALL">{t.allPricingModels}</option>
-                    <option value="FIXED">FIXED</option>
-                    <option value="PER_UNIT">PER_UNIT</option>
-                    <option value="PER_HOUR">PER_HOUR</option>
-                    <option value="PER_DAY">PER_DAY</option>
-                    <option value="PER_MONTH">PER_MONTH</option>
-                    <option value="PER_SESSION">PER_SESSION</option>
-                    <option value="CALCULATED">CALCULATED</option>
+                    <option value="ONE_TIME_CONTRACT">{t.oneTimeContract}</option>
+                    <option value="FULL_TIME">{t.fullTime}</option>
+                    <option value="PER_HOUR">{t.perHour}</option>
+                    <option value="PER_DAY">Per Day</option>
+                    <option value="PER_MONTH">Per Month</option>
+                    <option value="PER_SESSION">Per Session</option>
+                    <option value="FIXED">Fixed Price</option>
+                    <option value="PER_UNIT">Per Unit</option>
+                    <option value="CALCULATED">Calculated Rate</option>
                   </select>
                 </div>
 
@@ -1257,7 +1264,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                             </div>
 
                             <p className="mt-1 font-mono text-[11px] tabular-nums text-[#172B3A]/60">
-                              {biz.businessName} ·{' '}
+                              {biz.businessName} · {formatPricingModelLabel(item.pricingModel, language)} ·{' '}
                               {biz.profileType === 'INDIVIDUAL_JOB_SEEKER'
                                 ? biz.faydaVerified
                                   ? t.faydaLiveVerified
@@ -1320,13 +1327,11 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                           >
                             {item.listingType === 'JOB'
                               ? t.viewApply
-                              : item.listingType === 'JOB_SEEKER'
-                                ? t.hireContact
-                                : item.listingType === 'RENTAL'
-                                  ? t.reserveDates
-                                  : item.pricingModel === 'CALCULATED'
-                                    ? t.calculateBook
-                                    : t.bookNow}
+                              : item.listingType === 'RENTAL'
+                                ? t.reserveDates
+                                : item.listingType === 'EVENT'
+                                  ? t.bookNow
+                                  : t.contactMessage}
                           </button>
                         )}
                       </div>

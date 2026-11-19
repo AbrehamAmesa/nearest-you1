@@ -1,14 +1,8 @@
 package com.nearestyou.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.auth.oauth2.GoogleCredentials;
-import com.google.firebase.FirebaseApp;
-import com.google.firebase.FirebaseOptions;
-import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseToken;
 import com.nearestyou.entity.UserAccount;
 import com.nearestyou.service.UserSyncService;
-import jakarta.annotation.PostConstruct;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,68 +16,27 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
-import java.util.Optional;
 
 @Component
 public class FirebaseOrDevAuthFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(FirebaseOrDevAuthFilter.class);
 
+    private final AuthTokenResolver authTokenResolver;
     private final UserSyncService userSyncService;
-    private final LocalAuthTokenService localAuthTokenService;
-    private final FirebasePublicKeyVerifier firebasePublicKeyVerifier;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${nearestyou.auth.allow-dev-headers:false}")
     private boolean allowDevHeaders;
 
-    private boolean firebaseInitialized = false;
-
     public FirebaseOrDevAuthFilter(
-            UserSyncService userSyncService,
-            LocalAuthTokenService localAuthTokenService,
-            FirebasePublicKeyVerifier firebasePublicKeyVerifier
+            AuthTokenResolver authTokenResolver,
+            UserSyncService userSyncService
     ) {
+        this.authTokenResolver = authTokenResolver;
         this.userSyncService = userSyncService;
-        this.localAuthTokenService = localAuthTokenService;
-        this.firebasePublicKeyVerifier = firebasePublicKeyVerifier;
-    }
-
-    @PostConstruct
-    public void initFirebase() {
-        try {
-            if (!FirebaseApp.getApps().isEmpty()) {
-                firebaseInitialized = true;
-                return;
-            }
-            String inlineJson = System.getenv("FIREBASE_SERVICE_ACCOUNT_JSON");
-            if (inlineJson != null && !inlineJson.isBlank()) {
-                FirebaseOptions options = FirebaseOptions.builder()
-                        .setCredentials(GoogleCredentials.fromStream(
-                                new ByteArrayInputStream(inlineJson.getBytes(StandardCharsets.UTF_8))))
-                        .build();
-                FirebaseApp.initializeApp(options);
-                firebaseInitialized = true;
-            } else if (System.getenv("GOOGLE_APPLICATION_CREDENTIALS") != null) {
-                FirebaseOptions options = FirebaseOptions.builder()
-                        .setCredentials(GoogleCredentials.getApplicationDefault())
-                        .build();
-                FirebaseApp.initializeApp(options);
-                firebaseInitialized = true;
-            }
-            if (!firebaseInitialized) {
-                log.info("Firebase Admin service account not configured; using Google public certificates + local database authentication.");
-            } else {
-                log.info("Firebase Admin SDK initialized successfully.");
-            }
-        } catch (Exception ex) {
-            firebaseInitialized = false;
-            log.warn("Firebase Admin SDK initialization failed; falling back to Google public certificates + local database authentication.", ex);
-        }
     }
 
     @Override
@@ -97,43 +50,14 @@ public class FirebaseOrDevAuthFilter extends OncePerRequestFilter {
 
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7).trim();
-            if (localAuthTokenService.isLocalToken(token)) {
-                Optional<LocalAuthTokenService.TokenClaims> claimsOpt = localAuthTokenService.verifyToken(token);
-                if (claimsOpt.isEmpty()) {
-                    writeJsonError(response, HttpServletResponse.SC_UNAUTHORIZED,
-                            "Your session has expired. Please sign in again.");
-                    return;
-                }
-                resolvedAccount = userSyncService.findByUid(claimsOpt.get().uid()).orElse(null);
-                if (resolvedAccount == null) {
-                    writeJsonError(response, HttpServletResponse.SC_UNAUTHORIZED,
-                            "Account session is no longer valid. Please sign in again.");
-                    return;
-                }
-            } else {
-                String uid;
-                String email;
-                String fullName;
-                try {
-                    if (firebaseInitialized) {
-                        FirebaseToken decoded = FirebaseAuth.getInstance().verifyIdToken(token);
-                        uid = decoded.getUid();
-                        email = decoded.getEmail() != null ? decoded.getEmail() : "user@nearestyou.et";
-                        fullName = decoded.getName() != null ? decoded.getName() : email.split("@")[0];
-                    } else {
-                        FirebasePublicKeyVerifier.VerifiedFirebaseToken verified = firebasePublicKeyVerifier.verify(token);
-                        uid = verified.uid();
-                        email = verified.email() != null ? verified.email() : "user@nearestyou.et";
-                        fullName = verified.name() != null ? verified.name() : email.split("@")[0];
-                    }
-                    resolvedAccount = userSyncService.syncOrCreateUser(uid, email, fullName);
-                } catch (Exception ex) {
-                    log.warn("Token verification failed for request {} {}: {}",
-                            request.getMethod(), request.getRequestURI(), ex.getMessage());
-                    writeJsonError(response, HttpServletResponse.SC_UNAUTHORIZED,
-                            "Authentication failed. Please sign in again.");
-                    return;
-                }
+            try {
+                resolvedAccount = authTokenResolver.resolveBearerToken(token);
+            } catch (Exception ex) {
+                log.warn("Token verification failed for request {} {}: {}",
+                        request.getMethod(), request.getRequestURI(), ex.getMessage());
+                writeJsonError(response, HttpServletResponse.SC_UNAUTHORIZED,
+                        ex instanceof SecurityException ? ex.getMessage() : "Authentication failed. Please sign in again.");
+                return;
             }
         } else if (allowDevHeaders) {
             String devUid = request.getHeader("X-Dev-User-Uid");

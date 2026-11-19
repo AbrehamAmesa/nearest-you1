@@ -75,6 +75,9 @@ export const commerceApi = {
 // EngagementController
 export const engagementApi = {
   toggleFavorite: (listingId: number | string) => api.post('/api/v1/favorites/toggle', { listingId }),
+  getChatThreads: () => api.get('/api/v1/messages/threads'),
+  getThreadMessages: (threadKey: string) =>
+    api.get('/api/v1/messages/thread', { params: { threadKey } }),
   sendMessage: (payload: unknown) => api.post('/api/v1/messages', payload),
   applyForJob: (id: number | string, payload: unknown) => api.post(`/api/v1/jobs/${id}/applications`, payload),
   updateApplicationStatus: (id: number | string, payload: unknown) => api.post(`/api/v1/applications/${id}/status`, payload),

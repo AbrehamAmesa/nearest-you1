@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -29,6 +30,21 @@ public class EngagementController {
             @Valid @RequestBody ToggleFavoriteRequest req
     ) {
         return engagementService.toggleFavorite(principal.uid(), req.listingId());
+    }
+
+    @GetMapping("/messages/threads")
+    public List<Map<String, Object>> getChatThreads(
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        return engagementService.getChatThreads(principal);
+    }
+
+    @GetMapping("/messages/thread")
+    public Map<String, Object> getThreadMessages(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam String threadKey
+    ) {
+        return engagementService.getThreadMessages(principal, threadKey);
     }
 
     @PostMapping("/messages")

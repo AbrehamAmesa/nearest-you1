@@ -42,6 +42,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/register").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/catalog/**", "/api/v1/maps/**", "/api/v1/deliveries/track/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/catalog/image-search").permitAll()
+                        .requestMatchers("/api/v1/ws/**", "/ws/**").permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/**").authenticated()

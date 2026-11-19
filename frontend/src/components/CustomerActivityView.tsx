@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Briefcase,
   Lock,
+  MessageSquare,
   MessageSquareWarning,
   Radio,
   ShieldCheck,
@@ -12,6 +13,7 @@ import {
 import type {
   BookingRecord,
   Business,
+  ChatThreadSummary,
   DeliveryRecord,
   JobApplicationRecord,
   Listing,
@@ -19,8 +21,11 @@ import type {
 } from '../types/nearestyou.ts';
 import { formatEtb } from '../utils/geo.ts';
 import { TRANSLATIONS, type AppLanguage } from '../utils/i18n.ts';
-import { businessApi, jobSeekerApi } from '../api/index.ts';
+import { businessApi, engagementApi, jobSeekerApi } from '../api/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
+import { useLiveChatInboxListener } from '../hooks/useLiveChat.ts';
+import { LiveChatDrawer, type ActiveChatTarget } from './LiveChatDrawer.tsx';
+import { LiveChatPanel } from './LiveChatPanel.tsx';
 import { LiveDriverTrackerMap } from './ServiceMap.tsx';
 
 interface CustomerActivityViewProps {
@@ -42,9 +47,9 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
 }) => {
   const t = TRANSLATIONS[language].activity;
   const { firebaseUser, openAuthModal, authFetch } = useAuth();
-  const [tab, setTab] = useState<'ORDERS' | 'BOOKINGS' | 'DELIVERIES' | 'JOBS' | 'FAVORITES'>(
-    'ORDERS'
-  );
+  const [tab, setTab] = useState<
+    'ORDERS' | 'BOOKINGS' | 'DELIVERIES' | 'MESSAGES' | 'JOBS' | 'FAVORITES'
+  >('ORDERS');
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
@@ -52,6 +57,9 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   const [applications, setApplications] = useState<JobApplicationRecord[]>([]);
   const [myJobSeekerAds, setMyJobSeekerAds] = useState<Listing[]>([]);
   const [favIds, setFavIds] = useState<number[]>([]);
+  const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
+  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
+  const [chatDrawerTarget, setChatDrawerTarget] = useState<ActiveChatTarget | null>(null);
 
   // Verified review modal state
   const [reviewTarget, setReviewTarget] = useState<{
@@ -73,13 +81,30 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   const [trackingCodeOpen, setTrackingCodeOpen] = useState<string | null>(null);
   const [liveTrackData, setLiveTrackData] = useState<Partial<DeliveryRecord> | null>(null);
 
+  const loadThreadsOnly = async () => {
+    if (!firebaseUser) return;
+    try {
+      const res = await engagementApi.getChatThreads();
+      const nextThreads: ChatThreadSummary[] = Array.isArray(res.data) ? res.data : [];
+      setThreads(nextThreads);
+      setSelectedThreadKey((prev) => prev || nextThreads[0]?.threadKey || null);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useLiveChatInboxListener(Boolean(firebaseUser), () => {
+    loadThreadsOnly();
+  });
+
   const loadWorkspace = async () => {
     if (!firebaseUser) return;
     setLoading(true);
     try {
-      const [workspaceResult, seekerResult] = await Promise.allSettled([
+      const [workspaceResult, seekerResult, threadsResult] = await Promise.allSettled([
         authFetch('/api/v1/me/workspace'),
         jobSeekerApi.getMine(),
+        engagementApi.getChatThreads(),
       ]);
       if (workspaceResult.status === 'fulfilled' && workspaceResult.value.ok) {
         const data = await workspaceResult.value.json();
@@ -91,6 +116,13 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
       }
       if (seekerResult.status === 'fulfilled') {
         setMyJobSeekerAds(seekerResult.value.data?.listings || []);
+      }
+      if (threadsResult.status === 'fulfilled') {
+        const nextThreads: ChatThreadSummary[] = Array.isArray(threadsResult.value.data)
+          ? threadsResult.value.data
+          : [];
+        setThreads(nextThreads);
+        setSelectedThreadKey((prev) => prev || nextThreads[0]?.threadKey || null);
       }
     } catch (err) {
       console.error(err);
@@ -259,6 +291,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
             { id: 'ORDERS', label: `${t.tabOrders} (${orders.length})` },
             { id: 'BOOKINGS', label: `${t.tabBookings} (${bookings.length})` },
             { id: 'DELIVERIES', label: `${t.tabDeliveries} (${deliveries.length})` },
+            { id: 'MESSAGES', label: `${t.tabMessages} (${threads.length})` },
             { id: 'JOBS', label: `${t.tabJobs} (${applications.length})` },
             { id: 'FAVORITES', label: `${t.tabSaved} (${favIds.length})` },
           ].map((item) => (
@@ -336,7 +369,24 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="mt-4 flex justify-end">
+                      <div className="mt-4 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setChatDrawerTarget({
+                              threadKey: `order:${ord.id}`,
+                              orderId: ord.id,
+                              businessId: ord.businessId,
+                              recipientUid: biz?.ownerUid,
+                              title: `Order ${ord.orderNumber} · ${t.liveChat}`,
+                              subtitle: biz?.businessName || 'Vendor',
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-[#176B52] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#125641]"
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          {t.liveChat}
+                        </button>
                         <button
                           type="button"
                           onClick={() =>
@@ -407,6 +457,24 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                       </div>
 
                       <div className="mt-4 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setChatDrawerTarget({
+                              threadKey: `booking:${b.id}`,
+                              bookingId: b.id,
+                              businessId: b.businessId,
+                              listingId: b.listingId,
+                              recipientUid: biz?.ownerUid,
+                              title: `${b.bookingReference} · ${t.liveChat}`,
+                              subtitle: `${listing?.title || b.bookingType} · ${biz?.businessName || 'Provider'}`,
+                            })
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-[#176B52] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#125641]"
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          {t.liveChat}
+                        </button>
                         {b.bookingStatus === 'QUOTED' && !b.quoteApproved && (
                           <button
                             type="button"
@@ -593,6 +661,102 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                   </div>
                 ))
               )}
+            </div>
+          )}
+
+          {tab === 'MESSAGES' && (
+            <div className="grid gap-5 lg:grid-cols-12">
+              <div className="space-y-2 rounded-xl border border-[#172B3A]/10 bg-white p-3.5 lg:col-span-5">
+                <div className="flex items-center justify-between border-b border-[#172B3A]/10 pb-2.5">
+                  <h2 className="font-display text-sm font-bold text-[#172B3A]">
+                    {t.tabMessages} ({threads.length})
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={loadThreadsOnly}
+                    className="text-xs font-semibold text-[#176B52] hover:underline"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {threads.length === 0 ? (
+                  <p className="py-8 text-center text-xs text-[#172B3A]/60">
+                    No active conversations yet. Open any order or service listing and click Contact
+                    or Live Chat.
+                  </p>
+                ) : (
+                  <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                    {threads.map((th) => {
+                      const active = selectedThreadKey === th.threadKey;
+                      return (
+                        <button
+                          key={th.threadKey}
+                          type="button"
+                          onClick={() => setSelectedThreadKey(th.threadKey)}
+                          className={`w-full rounded-lg border p-3 text-left transition ${
+                            active
+                              ? 'border-[#176B52] bg-emerald-50/60'
+                              : 'border-[#172B3A]/10 bg-[#F4F6F5]/50 hover:bg-[#F4F6F5]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-xs font-bold text-[#172B3A]">
+                              {th.otherPartyName || th.businessName}
+                            </span>
+                            <span className="shrink-0 font-mono text-[10px] font-semibold text-[#176B52]">
+                              {th.orderNumber
+                                ? th.orderNumber
+                                : th.bookingReference
+                                  ? th.bookingReference
+                                  : 'SERVICE CHAT'}
+                            </span>
+                          </div>
+                          {th.listingTitle && (
+                            <p className="mt-0.5 truncate text-[11px] font-medium text-[#172B3A]/75">
+                              {th.listingTitle}
+                            </p>
+                          )}
+                          <p className="mt-1 line-clamp-1 text-[11px] text-[#172B3A]/65">
+                            {th.lastMessage?.senderName}: {th.lastMessage?.body}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="lg:col-span-7">
+                {(() => {
+                  const selected =
+                    threads.find((th) => th.threadKey === selectedThreadKey) || threads[0];
+                  if (!selected) {
+                    return (
+                      <div className="flex h-72 items-center justify-center rounded-xl border border-[#172B3A]/10 bg-white p-8 text-center text-xs text-[#172B3A]/60">
+                        Select a conversation on the left to read messages and reply live.
+                      </div>
+                    );
+                  }
+                  return (
+                    <LiveChatPanel
+                      threadKey={selected.threadKey}
+                      businessId={selected.businessId}
+                      listingId={selected.listingId}
+                      orderId={selected.orderId}
+                      bookingId={selected.bookingId}
+                      recipientUid={selected.otherPartyUid}
+                      title={selected.otherPartyName || selected.businessName}
+                      subtitle={
+                        selected.orderNumber
+                          ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
+                          : selected.listingTitle || selected.businessName
+                      }
+                      placeholder={TRANSLATIONS[language].discover.writeReply}
+                      onMessageSentOrReceived={() => loadThreadsOnly()}
+                    />
+                  );
+                })()}
+              </div>
             </div>
           )}
 
@@ -880,6 +1044,11 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
           </form>
         </div>
       )}
+      <LiveChatDrawer
+        target={chatDrawerTarget}
+        onClose={() => setChatDrawerTarget(null)}
+        onMessageReceived={() => loadThreadsOnly()}
+      />
     </div>
   );
 };
