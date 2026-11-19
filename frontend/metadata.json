@@ -1,0 +1,8 @@
+{
+  "name": "Nearest You",
+  "description": "Everything You Need, Just Around You — Location-based multi-service super app for Addis Ababa & Ethiopia with mandatory price transparency.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

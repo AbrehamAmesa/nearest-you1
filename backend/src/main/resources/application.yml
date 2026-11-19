@@ -1,0 +1,40 @@
+server:
+  port: ${PORT:8080}
+  tomcat:
+    max-swallow-size: 20MB
+
+spring:
+  application:
+    name: nearest-you-platform
+  servlet:
+    multipart:
+      max-file-size: 15MB
+      max-request-size: 20MB
+  datasource:
+    url: ${JDBC_DATABASE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:nearestyou}}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:Postgres@1234}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+nearestyou:
+  auth:
+    super-admin-emails: ${SUPER_ADMIN_EMAILS:abrehamamesw@gmail.com,admin@nearestyou.et}
+    allow-dev-headers: ${ALLOW_DEV_AUTH:false}
+    firebase-project-id: ${FIREBASE_PROJECT_ID:nearestyou}
+    token-secret: ${AUTH_TOKEN_SECRET:}
+  maps:
+    api-key: ${GOOGLE_MAPS_API_KEY:}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
