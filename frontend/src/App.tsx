@@ -118,6 +118,7 @@ function NearestYouWorkspace() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [jobSeekerModalOpen, setJobSeekerModalOpen] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
+  const [listingInitialEditMode, setListingInitialEditMode] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const notify = useCallback((msg: string) => {
@@ -275,6 +276,17 @@ function NearestYouWorkspace() {
   }, [businesses]);
 
   const handleAddToCart = (listing: Listing, business: Business, variant?: string) => {
+    const isOwnListing = Boolean(
+      business.ownerUid &&
+        ((dbUser?.uid && business.ownerUid === dbUser.uid) ||
+          (firebaseUser?.uid && business.ownerUid === firebaseUser.uid))
+    );
+    if (isOwnListing) {
+      notify('You cannot order your own advertisement.');
+      setListingInitialEditMode(false);
+      setSelectedListing(listing);
+      return;
+    }
     setCart((prev) => {
       const idx = prev.findIndex((i) => i.listing.id === listing.id && i.variant === variant);
       if (idx >= 0) {
@@ -386,7 +398,10 @@ function NearestYouWorkspace() {
             onOpenCompare={() => setCompareOpen(true)}
             onToggleCompare={handleToggleCompare}
             onToggleFavorite={handleToggleFavorite}
-            onSelectListing={setSelectedListing}
+            onSelectListing={(listing) => {
+              setListingInitialEditMode(false);
+              setSelectedListing(listing);
+            }}
             onAddToCart={handleAddToCart}
             onGoToDelivery={() => setActiveSection('delivery')}
             onGoToBecomeProvider={() => {
@@ -413,6 +428,10 @@ function NearestYouWorkspace() {
             onNotify={notify}
             onRefreshCatalog={() => loadCatalog()}
             onOpenJobSeekerAdvertise={handleOpenJobSeekerAdvertise}
+            onEditAd={(ad) => {
+              setListingInitialEditMode(true);
+              setSelectedListing(ad);
+            }}
           />
         )}
 
@@ -427,6 +446,10 @@ function NearestYouWorkspace() {
             initialTab={businessInitialTab}
             onRefreshCatalog={() => loadCatalog()}
             onNotify={notify}
+            onEditListing={(item) => {
+              setListingInitialEditMode(true);
+              setSelectedListing(item);
+            }}
           />
         )}
 
@@ -473,7 +496,10 @@ function NearestYouWorkspace() {
         userLat={detectedLocation.lat}
         userLng={detectedLocation.lng}
         onRemove={(id) => setCompareIds((p) => p.filter((x) => x !== id))}
-        onSelectListing={setSelectedListing}
+        onSelectListing={(listing) => {
+          setListingInitialEditMode(false);
+          setSelectedListing(listing);
+        }}
       />
 
       <ListingDetailModal
@@ -482,9 +508,18 @@ function NearestYouWorkspace() {
         reviews={reviews}
         userLat={detectedLocation.lat}
         userLng={detectedLocation.lng}
-        onClose={() => setSelectedListing(null)}
+        initialEditMode={listingInitialEditMode}
+        onClose={() => {
+          setSelectedListing(null);
+          setListingInitialEditMode(false);
+        }}
         onAddToCart={handleAddToCart}
         onActionSuccess={notify}
+        onListingUpdated={(updated) => {
+          setSelectedListing(updated);
+          setListings((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+          loadCatalog();
+        }}
       />
 
       <AuthModal
@@ -516,6 +551,10 @@ function NearestYouWorkspace() {
         onClose={() => setJobSeekerModalOpen(false)}
         onSuccess={() => loadCatalog()}
         onNotify={notify}
+        onEditAd={(ad) => {
+          setListingInitialEditMode(true);
+          setSelectedListing(ad);
+        }}
       />
 
       {toastMsg && (

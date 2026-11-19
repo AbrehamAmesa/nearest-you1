@@ -47,6 +47,7 @@ export const businessApi = {
   getPortal: () => api.get('/api/v1/business/portal'),
   createBusiness: (payload: unknown) => api.post('/api/v1/businesses', payload),
   createListing: (payload: unknown) => api.post('/api/v1/listings', payload),
+  updateListing: (id: number | string, payload: unknown) => api.put(`/api/v1/listings/${id}`, payload),
   updateAvailability: (id: number | string, payload: unknown) => api.patch(`/api/v1/listings/${id}/availability`, payload),
 };
 

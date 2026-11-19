@@ -43,6 +43,7 @@ import heroAddisMarketplaceImg from '../assets/images/hero_addis_marketplace_179
 import { ImageSearchModal } from './ImageSearchModal.tsx';
 import { ListingVisual } from './ListingVisual.tsx';
 import { ServiceDiscoveryMap } from './ServiceMap.tsx';
+import { useAuth } from '../context/AuthContext.tsx';
 
 interface CustomerDiscoverViewProps {
   categories: Category[];
@@ -140,6 +141,13 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
   onGoToBecomeProvider,
   onOpenJobSeekerAdvertise,
 }) => {
+  const { dbUser, firebaseUser } = useAuth();
+  const currentUids = useMemo(() => {
+    const ids = new Set<string>();
+    if (dbUser?.uid) ids.add(dbUser.uid);
+    if (firebaseUser?.uid) ids.add(firebaseUser.uid);
+    return ids;
+  }, [dbUser?.uid, firebaseUser?.uid]);
   const t = TRANSLATIONS[language].discover;
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>('ALL');
@@ -536,7 +544,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
   const locationDisplay = detectedLocation.label || detectedLocation.city || 'Addis Ababa';
 
   return (
-    <div className="space-y-10 pb-16">
+    <div className="space-y-10 overflow-x-hidden pb-16">
       {/* Hero Section */}
       <section className="mx-auto max-w-[1440px] px-4 pt-5 sm:px-6 sm:pt-8">
         <div className="grid items-stretch gap-6 lg:grid-cols-12 lg:gap-8">
@@ -716,10 +724,11 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {effectiveRecommendations.slice(0, 6).map(({ listing, business, category, distanceKm, reason }) => {
               const isOrderable = listing.listingType === 'PRODUCT' || listing.listingType === 'FOOD';
+              const isOwnListing = Boolean(business.ownerUid && currentUids.has(business.ownerUid));
               return (
                 <div
                   key={`rec-${listing.id}`}
-                  className="flex items-stretch gap-3.5 rounded-xl border border-[#176B52]/20 bg-white p-3.5 transition-shadow hover:shadow-md"
+                  className="flex min-w-0 items-stretch gap-3.5 rounded-xl border border-[#176B52]/20 bg-white p-3.5 transition-shadow hover:shadow-md"
                 >
                   <button
                     type="button"
@@ -774,19 +783,29 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                       <button
                         type="button"
                         onClick={() =>
-                          isOrderable ? onAddToCart(listing, business) : onSelectListing(listing)
+                          isOwnListing
+                            ? onSelectListing(listing)
+                            : isOrderable
+                              ? onAddToCart(listing, business)
+                              : onSelectListing(listing)
                         }
-                        className="rounded-md bg-[#176B52] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#125641] whitespace-nowrap"
+                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap ${
+                          isOwnListing
+                            ? 'border border-[#176B52]/35 bg-emerald-50 text-[#176B52] hover:bg-emerald-100'
+                            : 'bg-[#176B52] text-white hover:bg-[#125641]'
+                        }`}
                       >
-                        {isOrderable
-                          ? t.addToCart
-                          : listing.listingType === 'JOB'
-                            ? t.viewApply
-                            : listing.listingType === 'RENTAL'
-                              ? t.reserveDates
-                              : listing.listingType === 'EVENT'
-                                ? t.bookNow
-                                : t.contactMessage}
+                        {isOwnListing
+                          ? 'My Ad · View / Edit'
+                          : isOrderable
+                            ? t.addToCart
+                            : listing.listingType === 'JOB'
+                              ? t.viewApply
+                              : listing.listingType === 'RENTAL'
+                                ? t.reserveDates
+                                : listing.listingType === 'EVENT'
+                                  ? t.bookNow
+                                  : t.contactMessage}
                       </button>
                     </div>
                   </div>
@@ -1167,11 +1186,12 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                   const isCompared = compareIds.includes(item.id);
                   const isSaved = favoriteIds.includes(item.id);
                   const isOrderable = item.listingType === 'PRODUCT' || item.listingType === 'FOOD';
+                  const isOwnListing = Boolean(biz.ownerUid && currentUids.has(biz.ownerUid));
 
                   return (
                     <article
                       key={item.id}
-                      className="group flex flex-col justify-between overflow-hidden rounded-xl border border-[#172B3A]/10 bg-white transition-transform duration-150 hover:-translate-y-0.5 hover:shadow-md"
+                      className="group flex min-w-0 flex-col justify-between overflow-hidden rounded-xl border border-[#172B3A]/10 bg-white transition-transform duration-150 hover:-translate-y-0.5 hover:shadow-md"
                     >
                       <div>
                         <div onClick={() => onSelectListing(item)} className="cursor-pointer">
@@ -1311,7 +1331,15 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                           </button>
                         </div>
 
-                        {isOrderable ? (
+                        {isOwnListing ? (
+                          <button
+                            type="button"
+                            onClick={() => onSelectListing(item)}
+                            className="min-h-[38px] rounded-lg border border-[#176B52]/35 bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-[#176B52] transition-colors hover:bg-emerald-100 whitespace-nowrap shrink-0"
+                          >
+                            My Ad · View / Edit
+                          </button>
+                        ) : isOrderable ? (
                           <button
                             type="button"
                             onClick={() => onAddToCart(item, biz)}

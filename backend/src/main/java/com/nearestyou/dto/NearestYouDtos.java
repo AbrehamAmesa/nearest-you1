@@ -116,6 +116,27 @@ public final class NearestYouDtos {
         String status
     ) {}
 
+    public record UpdateListingRequest(
+        @NotBlank String title,
+        @NotBlank String description,
+        String imageUrl,
+        List<String> imageUrls,
+        @NotBlank String pricingModel,
+        @NotBlank String pricingUnit,
+        @NotNull BigDecimal basePrice,
+        BigDecimal discountPrice,
+        BigDecimal minimumCharge,
+        BigDecimal calloutFee,
+        BigDecimal depositAmount,
+        BigDecimal salaryMax,
+        Boolean isQuoteBased,
+        Boolean isUnpaid,
+        Map<String, Object> pricingFormula,
+        Map<String, Object> metadata,
+        String availabilityStatus,
+        String status
+    ) {}
+
     public record UpdateAvailabilityRequest(@NotBlank String availabilityStatus) {}
 
     public record OrderItemInput(@NotNull Long listingId, @Min(1) int quantity, String variant) {}

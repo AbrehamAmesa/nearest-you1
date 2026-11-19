@@ -11,6 +11,7 @@ import {
   MapPin,
   MessageSquare,
   Navigation,
+  Pencil,
   Plus,
   QrCode,
   Radio,
@@ -77,6 +78,7 @@ interface BusinessPortalViewProps {
   initialTab?: BusinessPortalTab;
   onRefreshCatalog: () => void;
   onNotify: (msg: string) => void;
+  onEditListing?: (listing: Listing) => void;
 }
 
 export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
@@ -89,6 +91,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   initialTab = 'PROVIDER_KYC',
   onRefreshCatalog,
   onNotify,
+  onEditListing,
 }) => {
   const { firebaseUser, dbUser, isAdmin, refreshProfile, openAuthModal, authFetch } = useAuth();
   const activeCategories = useMemo(
@@ -1158,7 +1161,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
         <div className="grid gap-8 lg:grid-cols-12">
           <form
             onSubmit={handlePublishListing}
-            className="space-y-4 rounded-2xl border border-[#172B3A]/10 bg-white p-6 lg:col-span-5"
+            className="min-w-0 space-y-4 rounded-2xl border border-[#172B3A]/10 bg-white p-4 sm:p-6 lg:col-span-5"
           >
             <div className="border-b border-[#172B3A]/10 pb-3">
               <h2 className="flex items-center gap-2 font-display text-lg font-semibold text-[#172B3A]">
@@ -1652,7 +1655,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
             </button>
           </form>
 
-          <div className="space-y-3 lg:col-span-7">
+          <div className="min-w-0 space-y-3 lg:col-span-7">
             <div className="md:hidden space-y-3">
               {portalListings.length === 0 ? (
                 <div className="rounded-2xl border border-[#172B3A]/10 bg-white p-8 text-center text-xs text-[#172B3A]/60">
@@ -1684,21 +1687,33 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                           {formatEtb(item.discountPrice || item.basePrice)}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                         <span className="text-[#172B3A]/70">
                           {formatPricingModelLabel(item.pricingModel, language)} / {item.pricingUnit}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleAvailability(item)}
-                          className={`min-h-[38px] rounded-md border px-3 py-1 font-medium ${
-                            item.availabilityStatus === 'AVAILABLE'
-                              ? 'border-[#176B52]/30 text-[#176B52]'
-                              : 'border-[#172B3A]/20 text-[#172B3A]/60'
-                          }`}
-                        >
-                          {item.availabilityStatus}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {onEditListing && (
+                            <button
+                              type="button"
+                              onClick={() => onEditListing(item)}
+                              className="inline-flex min-h-[38px] items-center gap-1 rounded-md border border-[#176B52]/30 bg-emerald-50 px-3 py-1 font-semibold text-[#176B52] hover:bg-emerald-100"
+                            >
+                              <Pencil className="h-3 w-3" />
+                              View &amp; Edit
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAvailability(item)}
+                            className={`min-h-[38px] rounded-md border px-3 py-1 font-medium ${
+                              item.availabilityStatus === 'AVAILABLE'
+                                ? 'border-[#176B52]/30 text-[#176B52]'
+                                : 'border-[#172B3A]/20 text-[#172B3A]/60'
+                            }`}
+                          >
+                            {item.availabilityStatus}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1753,17 +1768,29 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                             {formatEtb(item.discountPrice || item.basePrice)}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleAvailability(item)}
-                              className={`rounded-md border px-2.5 py-1 font-medium ${
-                                item.availabilityStatus === 'AVAILABLE'
-                                  ? 'border-[#176B52]/30 text-[#176B52]'
-                                  : 'border-[#172B3A]/20 text-[#172B3A]/60'
-                              }`}
-                            >
-                              {item.availabilityStatus}
-                            </button>
+                            <div className="inline-flex items-center justify-end gap-1.5">
+                              {onEditListing && (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditListing(item)}
+                                  className="inline-flex items-center gap-1 rounded-md border border-[#176B52]/30 bg-emerald-50 px-2.5 py-1 font-semibold text-[#176B52] hover:bg-emerald-100"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                  Edit
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAvailability(item)}
+                                className={`rounded-md border px-2.5 py-1 font-medium ${
+                                  item.availabilityStatus === 'AVAILABLE'
+                                    ? 'border-[#176B52]/30 text-[#176B52]'
+                                    : 'border-[#172B3A]/20 text-[#172B3A]/60'
+                                }`}
+                              >
+                                {item.availabilityStatus}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2053,7 +2080,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
 
       {tab === 'MESSAGES' && (
         <div className="grid gap-5 lg:grid-cols-12">
-          <div className="space-y-2 rounded-2xl border border-[#172B3A]/10 bg-white p-4 lg:col-span-5">
+          <div className="min-w-0 space-y-2 rounded-2xl border border-[#172B3A]/10 bg-white p-3.5 sm:p-4 lg:col-span-5">
             <div className="flex items-center justify-between border-b border-[#172B3A]/10 pb-2.5">
               <h2 className="font-display text-sm font-bold text-[#172B3A]">
                 Client Inquiries & Order Live Chats ({threads.length})
@@ -2072,7 +2099,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                 automatically in real time.
               </p>
             ) : (
-              <div className="max-h-[440px] space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-[440px] space-y-2 overflow-y-auto overflow-x-hidden pr-1">
                 {threads.map((th) => {
                   const active = selectedThreadKey === th.threadKey;
                   return (
@@ -2080,7 +2107,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                       key={th.threadKey}
                       type="button"
                       onClick={() => setSelectedThreadKey(th.threadKey)}
-                      className={`w-full rounded-lg border p-3 text-left transition ${
+                      className={`w-full min-w-0 rounded-lg border p-3 text-left transition ${
                         active
                           ? 'border-[#176B52] bg-emerald-50/60'
                           : 'border-[#172B3A]/10 bg-[#F4F6F5]/50 hover:bg-[#F4F6F5]'
@@ -2113,7 +2140,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
             )}
           </div>
 
-          <div className="lg:col-span-7">
+          <div className="min-w-0 lg:col-span-7">
             {(() => {
               const selected =
                 threads.find((th) => th.threadKey === selectedThreadKey) || threads[0];

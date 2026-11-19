@@ -124,10 +124,11 @@ public class EngagementService {
             Long businessId = parsePositiveLong(parts[1]);
             String customerUid = parts[3];
             if (businessId == null || customerUid.isBlank()) return false;
-            if (uid.equals(customerUid)) return true;
-            return businessRepo.findById(businessId)
-                    .map(b -> uid.equals(b.getOwnerUid()))
-                    .orElse(false);
+            Optional<Business> bizOpt = businessRepo.findById(businessId);
+            if (bizOpt.isEmpty()) return false;
+            Business biz = bizOpt.get();
+            if (customerUid.equals(biz.getOwnerUid())) return false;
+            return uid.equals(customerUid) || uid.equals(biz.getOwnerUid());
         }
 
         return false;
@@ -367,6 +368,9 @@ public class EngagementService {
                 }
                 biz = businessRepo.findById(resolvedBusinessId)
                         .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Service provider not found."));
+                if (customerUid.equals(biz.getOwnerUid())) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot send a message to yourself on your own advertisement.");
+                }
                 boolean allowed = principal.isAdmin() || uid.equals(customerUid) || uid.equals(biz.getOwnerUid());
                 if (!allowed) {
                     throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied for this conversation.");
@@ -383,6 +387,10 @@ public class EngagementService {
                 }
                 biz = businessRepo.findById(resolvedBusinessId)
                         .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Business not found."));
+                if (uid.equals(biz.getOwnerUid())
+                        && (recipientUid == null || recipientUid.isBlank() || recipientUid.trim().equals(uid))) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot send a message to yourself on your own advertisement.");
+                }
                 String customerUid = uid.equals(biz.getOwnerUid()) && recipientUid != null && !recipientUid.isBlank()
                         ? recipientUid.trim()
                         : uid;
@@ -392,6 +400,10 @@ public class EngagementService {
                     recipientUid = uid.equals(biz.getOwnerUid()) ? customerUid : biz.getOwnerUid();
                 }
             }
+        }
+
+        if (recipientUid != null && recipientUid.trim().equals(uid)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot send a message to yourself.");
         }
 
         String senderRole = principal.isAdmin()
@@ -443,6 +455,10 @@ public class EngagementService {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job vacancy not found."));
         if (!"JOB".equalsIgnoreCase(listing.getListingType())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Listing is not a job vacancy.");
+        }
+        Business jobBiz = businessRepo.findById(listing.getBusinessId()).orElse(null);
+        if (jobBiz != null && principal.uid().equals(jobBiz.getOwnerUid())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot apply to your own job advertisement.");
         }
         if (appRepo.existsByListingIdAndApplicantUid(listingId, principal.uid())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "You have already submitted an application for this job vacancy.");

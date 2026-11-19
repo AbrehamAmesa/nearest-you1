@@ -6,6 +6,7 @@ import {
   ImagePlus,
   MapPin,
   Navigation,
+  Pencil,
   Trash2,
   Upload,
   Video,
@@ -31,6 +32,7 @@ interface JobSeekerAdvertiseModalProps {
   onClose: () => void;
   onSuccess: () => void;
   onNotify: (msg: string) => void;
+  onEditAd?: (ad: Listing) => void;
 }
 
 export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = ({
@@ -41,6 +43,7 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
   onClose,
   onSuccess,
   onNotify,
+  onEditAd,
 }) => {
   const { dbUser, firebaseUser, openAuthModal } = useAuth();
 
@@ -298,13 +301,19 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#172B3A]/50 p-4 backdrop-blur-[2px]">
-      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#172B3A]/10 bg-white shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#172B3A]/10 bg-white px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <Briefcase className="h-5 w-5 text-[#176B52]" />
-            <div>
-              <h2 className="font-display text-lg font-bold text-[#172B3A]">
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-x-hidden bg-[#172B3A]/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[94dvh] w-full max-w-3xl overflow-x-hidden overflow-y-auto rounded-t-2xl border border-[#172B3A]/10 bg-white shadow-2xl sm:max-h-[92vh] sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-[#172B3A]/10 bg-white px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <Briefcase className="h-5 w-5 shrink-0 text-[#176B52]" />
+            <div className="min-w-0">
+              <h2 className="truncate font-display text-base font-bold text-[#172B3A] sm:text-lg">
                 Advertise Yourself as an Individual Job Seeker
               </h2>
               <p className="text-xs text-[#172B3A]/65">
@@ -317,13 +326,13 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
             type="button"
             onClick={onClose}
             aria-label="Close advertise yourself modal"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#172B3A]/10 text-[#172B3A]/70 hover:bg-[#F4F6F5]"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#172B3A]/10 text-[#172B3A]/70 hover:bg-[#F4F6F5]"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="space-y-6 p-6">
+        <div className="space-y-6 p-4 sm:p-6">
           <form onSubmit={handlePublish} className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
@@ -549,7 +558,7 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
             </div>
 
             {images.length > 0 && (
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
                 {images.map((src, idx) => (
                   <div key={idx} className="relative h-16 overflow-hidden rounded-lg border border-[#172B3A]/15">
                     <img src={src} alt={`Work sample ${idx + 1}`} className="h-full w-full object-cover" />
@@ -617,7 +626,20 @@ export const JobSeekerAdvertiseModal: React.FC<JobSeekerAdvertiseModalProps> = (
                           )}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {onEditAd && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onEditAd(ad);
+                            }}
+                            className="inline-flex min-h-[34px] items-center gap-1 rounded-md border border-[#176B52]/30 bg-emerald-50 px-2.5 py-1 font-semibold text-[#176B52] hover:bg-emerald-100"
+                          >
+                            <Pencil className="h-3 w-3" />
+                            Edit
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleToggleAvailability(ad)}

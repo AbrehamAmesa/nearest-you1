@@ -1,5 +1,4 @@
 import React from 'react';
-import { X } from 'lucide-react';
 import { LiveChatPanel } from './LiveChatPanel.tsx';
 import type { ChatMessage } from '../types/nearestyou.ts';
 
@@ -29,21 +28,13 @@ export const LiveChatDrawer: React.FC<LiveChatDrawerProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[1250] flex items-center justify-center bg-slate-900/60 p-3 backdrop-blur-xs sm:p-5"
+      className="fixed inset-0 z-[1250] flex items-end justify-center overflow-x-hidden bg-slate-900/60 p-2 backdrop-blur-xs sm:items-center sm:p-5"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        className="relative flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close live chat"
-          className="absolute right-3 top-2.5 z-10 rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white"
-        >
-          <X className="h-4 w-4" />
-        </button>
         <LiveChatPanel
           threadKey={target.threadKey}
           businessId={target.businessId}
@@ -53,6 +44,7 @@ export const LiveChatDrawer: React.FC<LiveChatDrawerProps> = ({
           recipientUid={target.recipientUid}
           title={target.title}
           subtitle={target.subtitle}
+          onClose={onClose}
           onMessageSentOrReceived={onMessageReceived}
         />
       </div>

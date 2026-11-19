@@ -4,6 +4,7 @@ import com.nearestyou.dto.NearestYouDtos.CreateBusinessRequest;
 import com.nearestyou.dto.NearestYouDtos.CreateListingRequest;
 import com.nearestyou.dto.NearestYouDtos.JobSeekerAdvertiseRequest;
 import com.nearestyou.dto.NearestYouDtos.UpdateAvailabilityRequest;
+import com.nearestyou.dto.NearestYouDtos.UpdateListingRequest;
 import com.nearestyou.entity.Business;
 import com.nearestyou.entity.ServiceListing;
 import com.nearestyou.security.UserPrincipal;
@@ -46,6 +47,15 @@ public class BusinessPortalController {
             @Valid @RequestBody CreateListingRequest req
     ) {
         return businessAndListingService.createListing(principal, req);
+    }
+
+    @PutMapping("/listings/{id}")
+    public ServiceListing updateListing(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateListingRequest req
+    ) {
+        return businessAndListingService.updateListing(principal, id, req);
     }
 
     @PatchMapping("/listings/{id}/availability")

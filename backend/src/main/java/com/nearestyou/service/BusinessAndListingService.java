@@ -3,6 +3,7 @@ package com.nearestyou.service;
 import com.nearestyou.dto.NearestYouDtos.CreateBusinessRequest;
 import com.nearestyou.dto.NearestYouDtos.CreateListingRequest;
 import com.nearestyou.dto.NearestYouDtos.JobSeekerAdvertiseRequest;
+import com.nearestyou.dto.NearestYouDtos.UpdateListingRequest;
 import com.nearestyou.entity.*;
 import com.nearestyou.exception.ApiException;
 import com.nearestyou.pricing.MandatoryPricingValidator;
@@ -407,6 +408,119 @@ public class BusinessAndListingService {
         auditLogRepo.save(log);
 
         return Map.of("archived", true, "id", listing.getId());
+    }
+
+    @Transactional
+    public ServiceListing updateListing(UserPrincipal principal, Long listingId, UpdateListingRequest req) {
+        ServiceListing listing = listingRepo.findById(listingId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Listing not found."));
+        Business biz = businessRepo.findById(listing.getBusinessId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Business not found."));
+        if (!principal.isAdmin() && !biz.getOwnerUid().equals(principal.uid())) {
+            throw new ApiException(HttpStatus.FORBIDDEN,
+                    "Permission denied: you can only edit advertisements you created.");
+        }
+
+        String nextStatus = (req.status() != null && !req.status().isBlank())
+                ? req.status().trim().toUpperCase(Locale.ROOT)
+                : listing.getStatus();
+        if (!Set.of("ACTIVE", "DRAFT").contains(nextStatus)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid listing status. Allowed: ACTIVE or DRAFT.");
+        }
+
+        String nextAvailability = (req.availabilityStatus() != null && !req.availabilityStatus().isBlank())
+                ? req.availabilityStatus().trim().toUpperCase(Locale.ROOT)
+                : listing.getAvailabilityStatus();
+        if (!Set.of("AVAILABLE", "UNAVAILABLE", "OUT_OF_STOCK").contains(nextAvailability)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid availability status.");
+        }
+
+        boolean nextQuoteBased = req.isQuoteBased() != null ? req.isQuoteBased() : listing.isQuoteBased();
+        boolean nextUnpaid = req.isUnpaid() != null ? req.isUnpaid() : listing.isUnpaid();
+        String existingCurrency = listing.getCurrency() != null ? listing.getCurrency() : "ETB";
+
+        if ("ACTIVE".equals(nextStatus)) {
+            pricingValidator.validateActiveListing(
+                    biz.getVerificationStatus(),
+                    existingCurrency,
+                    req.pricingModel(),
+                    req.pricingUnit(),
+                    req.basePrice(),
+                    req.discountPrice(),
+                    nextUnpaid,
+                    req.pricingFormula() != null ? req.pricingFormula() : listing.getPricingFormula()
+            );
+        }
+
+        List<String> sanitizedImages = sanitizeImageUrls(req.imageUrls(), req.imageUrl());
+        if (sanitizedImages.size() > 5) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Maximum 5 images are allowed per advertisement.");
+        }
+
+        // Only allow editing non-sensitive metadata keys; preserve protected keys like advertiserRole / licenseVerified
+        Map<String, Object> mergedMetadata = new LinkedHashMap<>();
+        if (listing.getMetadata() != null) {
+            mergedMetadata.putAll(listing.getMetadata());
+        }
+        Set<String> safeMetadataKeys = Set.of(
+                "skills", "experienceSummary", "availabilityNote", "cvUrl", "cvFileName",
+                "introVideoUrl", "companyLogoUrl", "variants", "deliveryOptions",
+                "schedule", "capacity", "employmentType", "contractType", "vehicleType",
+                "brand", "sku", "stockQuantity", "prepTimeMinutes", "durationMinutes"
+        );
+        if (req.metadata() != null) {
+            for (String key : safeMetadataKeys) {
+                if (req.metadata().containsKey(key)) {
+                    Object val = req.metadata().get(key);
+                    if (val == null || (val instanceof String s && s.isBlank())) {
+                        mergedMetadata.remove(key);
+                    } else {
+                        mergedMetadata.put(key, val);
+                    }
+                }
+            }
+        }
+
+        String companyLogoUrl = mergedMetadata.get("companyLogoUrl") instanceof String logoStr && !logoStr.isBlank()
+                ? logoStr.trim()
+                : null;
+        String primaryImageUrl = !sanitizedImages.isEmpty()
+                ? sanitizedImages.get(0)
+                : (req.imageUrl() != null && !req.imageUrl().isBlank() ? req.imageUrl().trim() : companyLogoUrl);
+
+        listing.setTitle(req.title().trim());
+        listing.setDescription(req.description().trim());
+        listing.setImageUrl(primaryImageUrl);
+        listing.setImageUrls(sanitizedImages);
+        listing.setPricingModel(req.pricingModel().trim().toUpperCase(Locale.ROOT));
+        listing.setPricingUnit(req.pricingUnit().trim());
+        listing.setBasePrice(req.basePrice());
+        listing.setDiscountPrice(req.discountPrice());
+        listing.setMinimumCharge(req.minimumCharge());
+        listing.setCalloutFee(req.calloutFee());
+        listing.setDepositAmount(req.depositAmount());
+        listing.setSalaryMax(req.salaryMax());
+        listing.setQuoteBased(nextQuoteBased);
+        listing.setUnpaid(nextUnpaid);
+        if (req.pricingFormula() != null) {
+            listing.setPricingFormula(req.pricingFormula());
+        }
+        listing.setMetadata(mergedMetadata.isEmpty() ? null : mergedMetadata);
+        listing.setAvailabilityStatus(nextAvailability);
+        listing.setStatus(nextStatus);
+
+        ServiceListing saved = listingRepo.save(listing);
+
+        AuditLog log = new AuditLog();
+        log.setActorUid(principal.uid());
+        log.setActorEmail(principal.email());
+        log.setAction("LISTING_UPDATED");
+        log.setEntityType("listing");
+        log.setEntityId(String.valueOf(saved.getId()));
+        log.setDetails(Map.of("title", saved.getTitle(), "basePrice", saved.getBasePrice(), "status", saved.getStatus()));
+        auditLogRepo.save(log);
+
+        return saved;
     }
 
     @Transactional

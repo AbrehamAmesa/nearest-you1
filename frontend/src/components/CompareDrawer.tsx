@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { Business, Listing } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
 import { formatPricingModelLabel } from '../utils/i18n.ts';
+import { useAuth } from '../context/AuthContext.tsx';
 
 interface CompareDrawerProps {
   open: boolean;
@@ -25,17 +26,25 @@ export const CompareDrawer: React.FC<CompareDrawerProps> = ({
   onRemove,
   onSelectListing,
 }) => {
+  const { dbUser, firebaseUser } = useAuth();
   if (!open) return null;
 
+  const isOwnBiz = (biz?: Business) =>
+    Boolean(
+      biz?.ownerUid &&
+        ((dbUser?.uid && biz.ownerUid === dbUser.uid) ||
+          (firebaseUser?.uid && biz.ownerUid === firebaseUser.uid))
+    );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#172B3A]/45 p-4 backdrop-blur-[2px]">
-      <div className="w-full max-w-4xl overflow-hidden rounded-xl border border-[#172B3A]/10 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-[#172B3A]/10 px-6 py-4">
-          <div>
-            <h2 className="font-display text-lg font-semibold text-[#172B3A]">
+    <div className="fixed inset-0 z-50 flex items-end justify-center overflow-x-hidden bg-[#172B3A]/45 p-2 backdrop-blur-[2px] sm:items-center sm:p-4">
+      <div className="max-h-[92dvh] w-full max-w-4xl overflow-hidden rounded-xl border border-[#172B3A]/10 bg-white shadow-2xl">
+        <div className="flex items-center justify-between gap-2 border-b border-[#172B3A]/10 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="truncate font-display text-base font-semibold text-[#172B3A] sm:text-lg">
               Side-by-Side Price & Service Comparison
             </h2>
-            <p className="text-xs text-[#172B3A]/60">
+            <p className="truncate text-xs text-[#172B3A]/60">
               Transparent comparison across base rate, pricing unit, extra fees, and distance
             </p>
           </div>
@@ -43,13 +52,13 @@ export const CompareDrawer: React.FC<CompareDrawerProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Close comparison"
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#172B3A]/10 text-[#172B3A]/70 hover:bg-[#F4F6F5]"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#172B3A]/10 text-[#172B3A]/70 hover:bg-[#F4F6F5]"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="overflow-x-auto p-6">
+        <div className="overflow-x-auto p-4 sm:p-6">
           {listings.length === 0 ? (
             <p className="py-10 text-center text-sm text-[#172B3A]/60">
               Select up to 3 listings using "+ Compare" to inspect prices side by side.
@@ -150,20 +159,24 @@ export const CompareDrawer: React.FC<CompareDrawerProps> = ({
                 </tr>
                 <tr>
                   <td className="py-3 pr-4" />
-                  {listings.map((item) => (
-                    <td key={item.id} className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onClose();
-                          onSelectListing(item);
-                        }}
-                        className="rounded-lg bg-[#176B52] px-3 py-2 text-xs font-semibold text-white hover:bg-[#125641]"
-                      >
-                        Inspect & Proceed
-                      </button>
-                    </td>
-                  ))}
+                  {listings.map((item) => {
+                    const biz = businessesMap.get(item.businessId);
+                    const mine = isOwnBiz(biz);
+                    return (
+                      <td key={item.id} className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onSelectListing(item);
+                          }}
+                          className="rounded-lg bg-[#176B52] px-3 py-2 text-xs font-semibold text-white hover:bg-[#125641]"
+                        >
+                          {mine ? 'View / Edit My Ad' : 'Inspect & Proceed'}
+                        </button>
+                      </td>
+                    );
+                  })}
                 </tr>
               </tbody>
             </table>

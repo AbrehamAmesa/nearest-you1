@@ -64,6 +64,9 @@ public class OrderAndBookingService {
             if (!"APPROVED".equalsIgnoreCase(biz.getVerificationStatus())) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "Vendor is unavailable for ordering.");
             }
+            if (principal.uid().equals(biz.getOwnerUid())) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot place an order on your own advertisement.");
+            }
             BigDecimal commissionRate = categoryRepo.findById(biz.getCategoryId())
                     .map(ServiceCategory::getCommissionRate)
                     .orElse(new BigDecimal("10.00"));
@@ -207,6 +210,9 @@ public class OrderAndBookingService {
         }
         Business biz = businessRepo.findById(listing.getBusinessId())
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Business not found."));
+        if (principal.uid().equals(biz.getOwnerUid())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot book or send a service request to your own advertisement.");
+        }
         BigDecimal commissionRate = categoryRepo.findById(listing.getCategoryId())
                 .map(ServiceCategory::getCommissionRate)
                 .orElse(new BigDecimal("10.00"));

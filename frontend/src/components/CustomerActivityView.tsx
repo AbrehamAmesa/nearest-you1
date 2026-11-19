@@ -5,6 +5,7 @@ import {
   Lock,
   MessageSquare,
   MessageSquareWarning,
+  Pencil,
   Radio,
   ShieldCheck,
   Star,
@@ -35,6 +36,7 @@ interface CustomerActivityViewProps {
   onNotify: (msg: string) => void;
   onRefreshCatalog: () => void;
   onOpenJobSeekerAdvertise?: () => void;
+  onEditAd?: (ad: Listing) => void;
 }
 
 export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
@@ -44,6 +46,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   onNotify,
   onRefreshCatalog,
   onOpenJobSeekerAdvertise,
+  onEditAd,
 }) => {
   const t = TRANSLATIONS[language].activity;
   const { firebaseUser, openAuthModal, authFetch } = useAuth();
@@ -666,7 +669,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
 
           {tab === 'MESSAGES' && (
             <div className="grid gap-5 lg:grid-cols-12">
-              <div className="space-y-2 rounded-xl border border-[#172B3A]/10 bg-white p-3.5 lg:col-span-5">
+              <div className="min-w-0 space-y-2 rounded-xl border border-[#172B3A]/10 bg-white p-3.5 lg:col-span-5">
                 <div className="flex items-center justify-between border-b border-[#172B3A]/10 pb-2.5">
                   <h2 className="font-display text-sm font-bold text-[#172B3A]">
                     {t.tabMessages} ({threads.length})
@@ -685,7 +688,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                     or Live Chat.
                   </p>
                 ) : (
-                  <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                  <div className="max-h-[420px] space-y-2 overflow-y-auto overflow-x-hidden pr-1">
                     {threads.map((th) => {
                       const active = selectedThreadKey === th.threadKey;
                       return (
@@ -693,7 +696,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                           key={th.threadKey}
                           type="button"
                           onClick={() => setSelectedThreadKey(th.threadKey)}
-                          className={`w-full rounded-lg border p-3 text-left transition ${
+                          className={`w-full min-w-0 rounded-lg border p-3 text-left transition ${
                             active
                               ? 'border-[#176B52] bg-emerald-50/60'
                               : 'border-[#172B3A]/10 bg-[#F4F6F5]/50 hover:bg-[#F4F6F5]'
@@ -726,7 +729,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                 )}
               </div>
 
-              <div className="lg:col-span-7">
+              <div className="min-w-0 lg:col-span-7">
                 {(() => {
                   const selected =
                     threads.find((th) => th.threadKey === selectedThreadKey) || threads[0];
@@ -800,7 +803,17 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                             : `${formatEtb(ad.basePrice)} / ${ad.pricingUnit}`}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {onEditAd && (
+                          <button
+                            type="button"
+                            onClick={() => onEditAd(ad)}
+                            className="inline-flex min-h-[34px] items-center gap-1 rounded-md border border-[#176B52]/30 bg-emerald-50 px-2.5 py-1 font-semibold text-[#176B52] hover:bg-emerald-100"
+                          >
+                            <Pencil className="h-3 w-3" />
+                            View / Edit
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={async () => {
@@ -895,10 +908,10 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
       )}
 
       {reviewTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#172B3A]/45 p-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center overflow-x-hidden bg-[#172B3A]/45 p-2 sm:items-center sm:p-4">
           <form
             onSubmit={handleSubmitReview}
-            className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-md space-y-4 overflow-x-hidden rounded-xl bg-white p-5 shadow-2xl sm:p-6"
           >
             <h2 className="font-display text-lg font-semibold text-[#172B3A]">
               Verified Transaction Review
@@ -953,10 +966,10 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
       )}
 
       {disputeTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#172B3A]/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center overflow-x-hidden bg-[#172B3A]/50 p-2 sm:items-center sm:p-4">
           <form
             onSubmit={handleReportTheft}
-            className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-md space-y-4 overflow-x-hidden rounded-xl bg-white p-5 shadow-2xl sm:p-6"
           >
             <h2 className="font-display text-lg font-bold text-red-700">
               {t.reportTheftBtn} · {disputeTarget.trackingCode}
@@ -1007,10 +1020,10 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
       )}
 
       {counterTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#172B3A]/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center overflow-x-hidden bg-[#172B3A]/50 p-2 sm:items-center sm:p-4">
           <form
             onSubmit={handleSubmitCounterStatement}
-            className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-md space-y-4 overflow-x-hidden rounded-xl bg-white p-5 shadow-2xl sm:p-6"
           >
             <h2 className="font-display text-lg font-bold text-[#172B3A]">
               Submit Counter-Statement · {counterTarget.trackingCode}
