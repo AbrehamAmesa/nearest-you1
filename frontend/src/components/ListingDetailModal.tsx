@@ -36,6 +36,8 @@ import {
   isServiceGiverOrJobSeeker,
 } from '../utils/sellerDisplay.ts';
 import { businessApi } from '../api/index.ts';
+import { calculateReturnLoss, getListingPolicy } from '../utils/listingPolicy.ts';
+import { ContractOfferSection } from './ContractOfferSection.tsx';
 import { ListingVisual } from './ListingVisual.tsx';
 import { LiveChatPanel } from './LiveChatPanel.tsx';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -92,6 +94,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
 
   // Service proposal / collapsible contract state
   const [showServiceProposalForm, setShowServiceProposalForm] = useState(false);
+  const [contractRefreshSignal, setContractRefreshSignal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -116,6 +119,16 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const [editCvUrl, setEditCvUrl] = useState('');
   const [editCvFileName, setEditCvFileName] = useState('');
   const [editCompanyLogoUrl, setEditCompanyLogoUrl] = useState('');
+  const [editDeliveryAvailable, setEditDeliveryAvailable] = useState(true);
+  const [editImmediateAcceptance, setEditImmediateAcceptance] = useState(true);
+  const [editEstimatedReadyMinutes, setEditEstimatedReadyMinutes] = useState('15');
+  const [editEstimatedDeliveryMinutes, setEditEstimatedDeliveryMinutes] = useState('45');
+  const [editReturnable, setEditReturnable] = useState(true);
+  const [editReturnWindowDays, setEditReturnWindowDays] = useState('3');
+  const [editReturnLossPercent, setEditReturnLossPercent] = useState('0');
+  const [editReturnLossFixedEtb, setEditReturnLossFixedEtb] = useState('0');
+  const [editDeliveryFeeNonRefundable, setEditDeliveryFeeNonRefundable] = useState(true);
+  const [editReturnPolicyNote, setEditReturnPolicyNote] = useState('');
   const [editMediaBusy, setEditMediaBusy] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -128,6 +141,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
 
   useEffect(() => {
     if (!listing) return;
+    const pol = getListingPolicy(listing);
     setGalleryIndex(0);
     setErrorMsg(null);
     setEditError(null);
@@ -151,6 +165,16 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
     setEditCvUrl(listing.metadata?.cvUrl || '');
     setEditCvFileName(listing.metadata?.cvFileName || '');
     setEditCompanyLogoUrl(listing.metadata?.companyLogoUrl || '');
+    setEditDeliveryAvailable(pol.deliveryAvailable);
+    setEditImmediateAcceptance(pol.immediateAcceptance);
+    setEditEstimatedReadyMinutes(String(pol.estimatedReadyMinutes));
+    setEditEstimatedDeliveryMinutes(String(pol.estimatedDeliveryMinutes));
+    setEditReturnable(pol.returnable);
+    setEditReturnWindowDays(String(pol.returnWindowDays || (pol.isFood ? 1 : 3)));
+    setEditReturnLossPercent(String(pol.returnLossPercent));
+    setEditReturnLossFixedEtb(String(pol.returnLossFixedEtb));
+    setEditDeliveryFeeNonRefundable(pol.deliveryFeeNonRefundableOnReturn);
+    setEditReturnPolicyNote(pol.returnPolicyNote);
   }, [listing, initialEditMode, isOwner]);
 
   useEffect(() => {
@@ -422,9 +446,30 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
       return;
     }
 
-    const safeMeta: ListingMetadata = {};
+    const safeMeta: ListingMetadata = { ...(listing.metadata || {}) };
     if (isJob) {
       safeMeta.companyLogoUrl = editCompanyLogoUrl.trim() || undefined;
+    }
+    if (isCartItem) {
+      const readyMin = Math.max(5, Math.round(Number(editEstimatedReadyMinutes) || 15));
+      const delivMin = Math.max(readyMin, Math.round(Number(editEstimatedDeliveryMinutes) || 45));
+      safeMeta.deliveryAvailable = editDeliveryAvailable;
+      safeMeta.immediateAcceptance =
+        listing.listingType === 'FOOD' ? false : editImmediateAcceptance;
+      safeMeta.estimatedReadyMinutes = readyMin;
+      safeMeta.estimatedDeliveryMinutes = delivMin;
+      safeMeta.returnable = editReturnable;
+      safeMeta.returnWindowDays = editReturnable
+        ? Math.max(1, Math.round(Number(editReturnWindowDays) || 3))
+        : 0;
+      safeMeta.returnLossPercent = editReturnable
+        ? Math.min(100, Math.max(0, Number(editReturnLossPercent) || 0))
+        : 100;
+      safeMeta.returnLossFixedEtb = editReturnable
+        ? Math.max(0, Number(editReturnLossFixedEtb) || 0)
+        : 0;
+      safeMeta.deliveryFeeNonRefundableOnReturn = !editReturnable || editDeliveryFeeNonRefundable;
+      safeMeta.returnPolicyNote = editReturnPolicyNote.trim() || undefined;
     }
     if (isWorkforceOrSeeker) {
       safeMeta.skills = editSkills.trim() || undefined;
@@ -1128,6 +1173,175 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                       </div>
                     )}
 
+                    {isCartItem && (
+                      <div className="space-y-3 rounded-lg border border-[#172B3A]/12 bg-white p-3">
+                        <p className="text-xs font-bold text-[#172B3A]">
+                          Delivery, Order Acceptance &amp; Unsatisfied Return Policy
+                        </p>
+
+                        <div className="grid gap-2.5 sm:grid-cols-2">
+                          <div>
+                            <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                              Delivery Availability
+                            </label>
+                            <select
+                              value={editDeliveryAvailable ? 'WITH_DELIVERY' : 'PICKUP_ONLY'}
+                              onChange={(e) =>
+                                setEditDeliveryAvailable(e.target.value === 'WITH_DELIVERY')
+                              }
+                              className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 px-2.5 text-xs"
+                            >
+                              <option value="WITH_DELIVERY">With Delivery Available</option>
+                              <option value="PICKUP_ONLY">Without Delivery (Store Pickup Only)</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                              Order Acceptance Mode
+                            </label>
+                            {listing.listingType === 'FOOD' ? (
+                              <p className="mt-1.5 text-[11px] font-medium text-amber-800">
+                                Food Order Request (Seller reviews &amp; confirms ready/delivery time)
+                              </p>
+                            ) : (
+                              <select
+                                value={editImmediateAcceptance ? 'IMMEDIATE' : 'REQUEST'}
+                                onChange={(e) =>
+                                  setEditImmediateAcceptance(e.target.value === 'IMMEDIATE')
+                                }
+                                className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 px-2.5 text-xs"
+                              >
+                                <option value="IMMEDIATE">Immediate Acceptance on Checkout</option>
+                                <option value="REQUEST">Order Request (Seller Accepts First)</option>
+                              </select>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid gap-2.5 sm:grid-cols-2">
+                          <div>
+                            <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                              Approx. Ready Time (minutes)
+                            </label>
+                            <input
+                              type="number"
+                              min={5}
+                              value={editEstimatedReadyMinutes}
+                              onChange={(e) => setEditEstimatedReadyMinutes(e.target.value)}
+                              className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 px-2.5 font-mono text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                              Approx. Delivery Time (minutes)
+                            </label>
+                            <input
+                              type="number"
+                              min={5}
+                              disabled={!editDeliveryAvailable}
+                              value={editEstimatedDeliveryMinutes}
+                              onChange={(e) => setEditEstimatedDeliveryMinutes(e.target.value)}
+                              className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 px-2.5 font-mono text-xs disabled:bg-slate-100"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 border-t border-[#172B3A]/10 pt-2.5">
+                          <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                            If Buyer Is Unsatisfied (Returnability)
+                          </label>
+                          <select
+                            value={editReturnable ? 'RETURNABLE' : 'NON_RETURNABLE'}
+                            onChange={(e) => setEditReturnable(e.target.value === 'RETURNABLE')}
+                            className="h-9 w-full rounded-lg border border-[#172B3A]/15 px-2.5 text-xs"
+                          >
+                            <option value="RETURNABLE">Returnable within Return Window</option>
+                            <option value="NON_RETURNABLE">Cannot Be Returned (Final Sale — 100% Loss)</option>
+                          </select>
+
+                          {editReturnable && (
+                            <div className="grid gap-2 sm:grid-cols-3">
+                              <div>
+                                <label className="block text-[10px] font-medium text-[#172B3A]/70">
+                                  Window (Days)
+                                </label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={editReturnWindowDays}
+                                  onChange={(e) => setEditReturnWindowDays(e.target.value)}
+                                  className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 px-2 font-mono text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-medium text-[#172B3A]/70">
+                                  Buyer Loss (%)
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  value={editReturnLossPercent}
+                                  onChange={(e) => setEditReturnLossPercent(e.target.value)}
+                                  className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 px-2 font-mono text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-medium text-[#172B3A]/70">
+                                  Fixed Deduction (ETB)
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={editReturnLossFixedEtb}
+                                  onChange={(e) => setEditReturnLossFixedEtb(e.target.value)}
+                                  className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 px-2 font-mono text-xs"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] font-medium text-[#172B3A]">
+                            <input
+                              type="checkbox"
+                              checked={!editReturnable || editDeliveryFeeNonRefundable}
+                              disabled={!editReturnable}
+                              onChange={(e) => setEditDeliveryFeeNonRefundable(e.target.checked)}
+                              className="h-3.5 w-3.5 accent-[#176B52]"
+                            />
+                            Buyer loses delivery fee if returned unsatisfied
+                          </label>
+
+                          <input
+                            type="text"
+                            value={editReturnPolicyNote}
+                            onChange={(e) => setEditReturnPolicyNote(e.target.value)}
+                            placeholder="Condition note (e.g., original seal/packaging required)"
+                            className="h-9 w-full rounded-lg border border-[#172B3A]/15 px-2.5 text-xs"
+                          />
+
+                          {(() => {
+                            const sampleItem = Number(editDiscountPrice || editBasePrice) || 0;
+                            const sampleDeliv = editDeliveryAvailable ? 120 : 0;
+                            const loss = calculateReturnLoss(sampleItem, sampleDeliv, {
+                              returnable: editReturnable,
+                              returnLossPercent: Number(editReturnLossPercent) || 0,
+                              returnLossFixedEtb: Number(editReturnLossFixedEtb) || 0,
+                              deliveryFeeNonRefundableOnReturn:
+                                !editReturnable || editDeliveryFeeNonRefundable,
+                            });
+                            return (
+                              <p className="rounded bg-[#F4F6F5] px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-[#172B3A]/80">
+                                Preview (1 unit @ {formatEtb(sampleItem)} + {formatEtb(sampleDeliv)} delivery):
+                                Buyer loses {formatEtb(loss.totalLossEtb)} · Refund {formatEtb(loss.refundEtb)}
+                              </p>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className="block text-xs font-medium text-[#172B3A]/75">
@@ -1227,6 +1441,29 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                         <span className="text-[#172B3A]/65">Status</span>
                         <span className="font-semibold text-[#172B3A]">{listing.status}</span>
                       </div>
+                      {isCartItem && (() => {
+                        const pol = getListingPolicy(listing);
+                        return (
+                          <>
+                            <div className="flex justify-between gap-2">
+                              <span className="text-[#172B3A]/65">Delivery</span>
+                              <span className="font-semibold text-[#172B3A]">
+                                {pol.deliveryAvailable
+                                  ? `With Delivery (~${pol.estimatedDeliveryMinutes} min)`
+                                  : 'Without Delivery (Pickup Only)'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between gap-2">
+                              <span className="text-[#172B3A]/65">Return if Unsatisfied</span>
+                              <span className="font-semibold text-[#172B3A]">
+                                {pol.returnable
+                                  ? `${pol.returnWindowDays}d · ${pol.returnLossPercent}% + ${formatEtb(pol.returnLossFixedEtb)} loss`
+                                  : 'Non-Returnable'}
+                              </span>
+                            </div>
+                          </>
+                        );
+                      })()}
                       <div className="flex justify-between gap-2">
                         <span className="text-[#172B3A]/65">Verification (Locked)</span>
                         <span className="font-semibold text-[#172B3A]">
@@ -1249,6 +1486,59 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                 <>
                   {isCartItem && (
                     <div className="space-y-4">
+                      {(() => {
+                        const pol = getListingPolicy(listing);
+                        const itemPrice = Number(listing.discountPrice || listing.basePrice) || 0;
+                        const sampleDeliveryFee = pol.deliveryAvailable ? 120 : 0;
+                        const loss = calculateReturnLoss(itemPrice, sampleDeliveryFee, pol, 1);
+                        return (
+                          <div className="space-y-2 rounded-xl border border-[#172B3A]/12 bg-white p-3.5 text-xs">
+                            <p className="font-bold text-[#172B3A]">
+                              Delivery, Acceptance &amp; Unsatisfied Return Disclosure
+                            </p>
+                            <div className="space-y-1 text-[#172B3A]/80">
+                              <p>
+                                <strong className="text-[#172B3A]">Delivery:</strong>{' '}
+                                {pol.deliveryAvailable
+                                  ? `With Delivery · Ready in ~${pol.estimatedReadyMinutes} min · Deliverable in ~${pol.estimatedDeliveryMinutes} min`
+                                  : `Without Delivery (Store Pickup Only at ${business.landmark}, ${business.subCity}) · Ready in ~${pol.estimatedReadyMinutes} min`}
+                              </p>
+                              <p>
+                                <strong className="text-[#172B3A]">Order Acceptance:</strong>{' '}
+                                {pol.isFood
+                                  ? 'Order Request — Seller reviews your order and confirms exact prep & delivery time.'
+                                  : pol.immediateAcceptance
+                                    ? `Immediate Acceptance — Confirmed on checkout with ~${pol.estimatedReadyMinutes} min ready / ~${pol.estimatedDeliveryMinutes} min delivery.`
+                                    : 'Order Request — Seller accepts/rejects and confirms ready & delivery time.'}
+                              </p>
+                              <p>
+                                <strong className="text-[#172B3A]">If Unsatisfied (Returns):</strong>{' '}
+                                {pol.returnable
+                                  ? `Returnable within ${pol.returnWindowDays} day(s). Deduction: ${pol.returnLossPercent}% item fee${pol.returnLossFixedEtb > 0 ? ` + ${formatEtb(pol.returnLossFixedEtb)}` : ''}. ${
+                                      pol.deliveryAvailable
+                                        ? pol.deliveryFeeNonRefundableOnReturn
+                                          ? 'Buyer loses the delivery fee upon return.'
+                                          : 'Delivery fee is refunded on return.'
+                                        : ''
+                                    }`
+                                  : 'Non-Returnable (Final Sale). Buyer bears 100% of item and delivery cost if unsatisfied.'}
+                              </p>
+                              <p className="font-mono text-[11px] tabular-nums text-[#176B52]">
+                                Sample buyer loss (1 unit @ {formatEtb(itemPrice)}
+                                {pol.deliveryAvailable ? ` + ${formatEtb(sampleDeliveryFee)} est. delivery` : ''}):{' '}
+                                <strong>{formatEtb(loss.totalLossEtb)} lost</strong> (Refund:{' '}
+                                <strong>{formatEtb(loss.refundEtb)}</strong>)
+                              </p>
+                              {pol.returnPolicyNote && (
+                                <p className="text-[11px] text-[#172B3A]/65">
+                                  Seller note: {pol.returnPolicyNote}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {variants.length > 0 && (
                         <div>
                           <span className="block text-xs font-medium text-[#172B3A]/75">
@@ -1310,7 +1600,23 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                                 preview: text,
                               })
                             }
+                            onContractUpdated={() => setContractRefreshSignal((n) => n + 1)}
                           />
+
+                          <ContractOfferSection
+                            threadKey={contactThreadKey}
+                            businessId={business.id}
+                            listingId={listing.id}
+                            recipientUid={business.ownerUid}
+                            defaultContractType={listing.pricingModel}
+                            defaultTitle={listing.title}
+                            defaultAmount={Number(listing.discountPrice || listing.basePrice || 0)}
+                            isOwner={isOwner}
+                            compact
+                            refreshSignal={contractRefreshSignal}
+                            onContractChanged={() => setContractRefreshSignal((n) => n + 1)}
+                          />
+
                           <button
                             type="button"
                             onClick={() => setShowServiceProposalForm((prev) => !prev)}
@@ -1318,8 +1624,8 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                           >
                             <span className="min-w-0 break-words">
                               {isJobSeeker
-                                ? 'Send Formal Hire / Contract Proposal (Optional)'
-                                : 'Send Formal Service Request / Estimate (Optional)'}
+                                ? 'Schedule Visit / Dated Engagement Request (Optional)'
+                                : 'Schedule Service Date & Estimate Request (Optional)'}
                             </span>
                             {showServiceProposalForm ? (
                               <ChevronUp className="h-4 w-4 shrink-0 text-[#176B52]" />

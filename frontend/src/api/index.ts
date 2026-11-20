@@ -10,6 +10,7 @@ export const userApi = {
     api.post('/api/v1/auth/change-password', payload),
   me: () => api.get('/api/v1/auth/me'),
   updateProfile: (payload: unknown) => api.put('/api/v1/users/profile', payload),
+  heartbeat: () => api.post('/api/v1/users/heartbeat'),
   getWorkspace: () => api.get('/api/v1/me/workspace'),
 };
 
@@ -80,6 +81,11 @@ export const engagementApi = {
   getThreadMessages: (threadKey: string) =>
     api.get('/api/v1/messages/thread', { params: { threadKey } }),
   sendMessage: (payload: unknown) => api.post('/api/v1/messages', payload),
+  getContracts: (params?: { threadKey?: string; listingId?: number }) =>
+    api.get('/api/v1/contracts', { params }),
+  createContract: (payload: unknown) => api.post('/api/v1/contracts', payload),
+  respondContract: (id: number | string, payload: unknown) =>
+    api.post(`/api/v1/contracts/${id}/respond`, payload),
   applyForJob: (id: number | string, payload: unknown) => api.post(`/api/v1/jobs/${id}/applications`, payload),
   updateApplicationStatus: (id: number | string, payload: unknown) => api.post(`/api/v1/applications/${id}/status`, payload),
   createReview: (payload: unknown) => api.post('/api/v1/reviews', payload),

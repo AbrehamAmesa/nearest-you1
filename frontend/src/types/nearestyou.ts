@@ -15,6 +15,17 @@ export interface ListingMetadata {
   variants?: string[];
   prepTimeMinutes?: number;
   durationMinutes?: number;
+  deliveryAvailable?: boolean;
+  immediateAcceptance?: boolean;
+  estimatedReadyMinutes?: number;
+  estimatedDeliveryMinutes?: number;
+  deliveryWindowLabel?: string;
+  returnable?: boolean;
+  returnWindowDays?: number;
+  returnLossPercent?: number;
+  returnLossFixedEtb?: number;
+  deliveryFeeNonRefundableOnReturn?: boolean;
+  returnPolicyNote?: string;
   employmentType?: string;
   contractType?: string;
   vehicleType?: string;
@@ -262,6 +273,25 @@ export interface OrderRecord {
   paymentMethod: string;
   paymentStatus: string;
   orderStatus: string;
+  immediateAcceptance?: boolean;
+  estimatedReadyMinutes?: number | null;
+  estimatedDeliveryMinutes?: number | null;
+  estimatedReadyAt?: string | null;
+  estimatedDeliveryAt?: string | null;
+  acceptedAt?: string | null;
+  rejectionReason?: string | null;
+  returnPolicySnapshot?: {
+    deliveryAvailable?: boolean;
+    returnable?: boolean;
+    returnWindowDays?: number;
+    returnLossPercent?: number;
+    returnLossFixedEtb?: number;
+    deliveryFeeNonRefundableOnReturn?: boolean;
+    estimatedItemLossOnReturnEtb?: number;
+    estimatedDeliveryLossOnReturnEtb?: number;
+    estimatedTotalLossOnReturnEtb?: number;
+    returnPolicyNote?: string;
+  } | null;
   createdAt: string;
 }
 
@@ -462,6 +492,8 @@ export interface DbUserRecord {
   livenessVerifiedAt: string | null;
   providerVerificationStatus: string;
   accountStatus: string;
+  lastSeenAt?: string | null;
+  isActiveLastMinute?: boolean;
   createdAt: string;
 }
 
@@ -531,6 +563,47 @@ export interface ChatThreadSummary {
   bookingReference: string | null;
   otherPartyUid: string | null;
   otherPartyName: string | null;
+  otherPartyLastSeenAt?: string | null;
+  otherPartyActiveLastMinute?: boolean;
   messageCount: number;
   lastMessage: ChatMessage;
+}
+
+export interface ServiceContractRecord {
+  id: number;
+  contractReference: string;
+  threadKey: string;
+  businessId: number;
+  listingId: number | null;
+  bookingId: number | null;
+  serviceGiverUid: string;
+  serviceGiverName: string;
+  clientUid: string;
+  clientName: string;
+  offeredByUid: string;
+  offeredByRole: 'CUSTOMER' | 'PROVIDER' | string;
+  contractType: 'ONE_TIME_CONTRACT' | 'FULL_TIME' | 'PER_HOUR' | 'PER_DAY' | 'PER_MONTH' | string;
+  title: string;
+  scopeSummary: string;
+  deliverables?: string | null;
+  paymentSchedule: 'ON_COMPLETION' | 'MILESTONE' | 'UPFRONT_ESCROW' | 'MONTHLY' | 'WEEKLY' | string;
+  agreedAmount: string;
+  hourlyRate?: string | null;
+  estimatedHours?: number | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  status:
+    | 'OFFERED'
+    | 'COUNTERED'
+    | 'ACCEPTED'
+    | 'ACTIVE'
+    | 'COMPLETED'
+    | 'DECLINED'
+    | 'CANCELLED'
+    | string;
+  counterNotes?: string | null;
+  acceptedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }

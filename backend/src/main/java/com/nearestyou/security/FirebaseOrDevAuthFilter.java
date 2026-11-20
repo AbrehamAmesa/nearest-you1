@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Map;
 
 @Component
@@ -75,6 +76,8 @@ public class FirebaseOrDevAuthFilter extends OncePerRequestFilter {
                         "Account is suspended by platform administration.");
                 return;
             }
+            resolvedAccount.setLastSeenAt(Instant.now());
+            userSyncService.touchUserPresence(resolvedAccount.getUid(), false);
             UserPrincipal principal = new UserPrincipal(resolvedAccount);
             var authentication = new UsernamePasswordAuthenticationToken(
                     principal, null, principal.authorities());

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { engagementApi } from '../api/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
-import type { ChatMessage } from '../types/nearestyou.ts';
+import type { ChatMessage, ServiceContractRecord } from '../types/nearestyou.ts';
 
 function buildWebSocketUrl(token: string): string {
   const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
@@ -24,6 +24,13 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMe
   );
 }
 
+export interface PartnerPresenceInfo {
+  uid: string | null;
+  name: string | null;
+  lastSeenAt: string | null;
+  isActiveLastMinute: boolean;
+}
+
 export interface UseLiveChatOptions {
   threadKey: string | null | undefined;
   businessId?: number | null;
@@ -33,6 +40,7 @@ export interface UseLiveChatOptions {
   recipientUid?: string | null;
   enabled?: boolean;
   onMessageReceived?: (msg: ChatMessage) => void;
+  onContractUpdated?: (contract: ServiceContractRecord) => void;
 }
 
 export function useLiveChat({
@@ -44,9 +52,11 @@ export function useLiveChat({
   recipientUid,
   enabled = true,
   onMessageReceived,
+  onContractUpdated,
 }: UseLiveChatOptions) {
   const { dbUser, getAccessToken } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [partnerPresence, setPartnerPresence] = useState<PartnerPresenceInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -55,39 +65,52 @@ export function useLiveChat({
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const heartbeatTimerRef = useRef<number | null>(null);
+  const presencePollRef = useRef<number | null>(null);
   const attemptRef = useRef(0);
   const mountedRef = useRef(true);
   const activeThreadRef = useRef<string | null | undefined>(threadKey);
   const onMessageRef = useRef(onMessageReceived);
+  const onContractRef = useRef(onContractUpdated);
 
   activeThreadRef.current = threadKey;
   onMessageRef.current = onMessageReceived;
+  onContractRef.current = onContractUpdated;
 
-  const fetchThreadHistory = useCallback(async () => {
-    if (!enabled || !threadKey || !dbUser) return;
-    setLoading(true);
-    try {
-      const res = await engagementApi.getThreadMessages(threadKey);
-      if (!mountedRef.current || activeThreadRef.current !== threadKey) return;
-      const list: ChatMessage[] = Array.isArray(res.data?.messages) ? res.data.messages : [];
-      setMessages(list);
-      setError(null);
-    } catch (err: any) {
-      if (!mountedRef.current) return;
-      const status = err?.response?.status;
-      if (status !== 404) {
-        setError(err?.response?.data?.error || 'Could not load conversation history.');
+  const fetchThreadHistory = useCallback(
+    async (silent = false) => {
+      if (!enabled || !threadKey || !dbUser) return;
+      if (!silent) setLoading(true);
+      try {
+        const res = await engagementApi.getThreadMessages(threadKey);
+        if (!mountedRef.current || activeThreadRef.current !== threadKey) return;
+        const list: ChatMessage[] = Array.isArray(res.data?.messages) ? res.data.messages : [];
+        setMessages(list);
+        setPartnerPresence({
+          uid: res.data?.otherPartyUid ?? null,
+          name: res.data?.otherPartyName ?? null,
+          lastSeenAt: res.data?.otherPartyLastSeenAt ?? null,
+          isActiveLastMinute: Boolean(res.data?.otherPartyActiveLastMinute),
+        });
+        setError(null);
+      } catch (err: any) {
+        if (!mountedRef.current || silent) return;
+        const status = err?.response?.status;
+        if (status !== 404) {
+          setError(err?.response?.data?.error || 'Could not load conversation history.');
+        }
+      } finally {
+        if (mountedRef.current && !silent) setLoading(false);
       }
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, [enabled, threadKey, dbUser]);
+    },
+    [enabled, threadKey, dbUser]
+  );
 
   useEffect(() => {
     setMessages([]);
+    setPartnerPresence(null);
     setError(null);
     if (enabled && threadKey && dbUser) {
-      fetchThreadHistory();
+      fetchThreadHistory(false);
     }
   }, [enabled, threadKey, dbUser?.uid, fetchThreadHistory]);
 
@@ -109,7 +132,15 @@ export function useLiveChat({
         window.clearInterval(heartbeatTimerRef.current);
         heartbeatTimerRef.current = null;
       }
+      if (presencePollRef.current !== null) {
+        window.clearInterval(presencePollRef.current);
+        presencePollRef.current = null;
+      }
     };
+
+    presencePollRef.current = window.setInterval(() => {
+      fetchThreadHistory(true);
+    }, 25000);
 
     const connect = async () => {
       if (cancelled || !mountedRef.current) return;
@@ -129,7 +160,7 @@ export function useLiveChat({
           setConnected(true);
           if (activeThreadRef.current) {
             ws.send(JSON.stringify({ type: 'join', threadKey: activeThreadRef.current }));
-            fetchThreadHistory();
+            fetchThreadHistory(false);
           }
           heartbeatTimerRef.current = window.setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) {
@@ -149,10 +180,27 @@ export function useLiveChat({
                 incoming.threadKey === activeThreadRef.current;
               if (matchesThread) {
                 setMessages((prev) => mergeMessages(prev, [incoming]));
+                if (incoming.senderUid && incoming.senderUid !== dbUser.uid) {
+                  setPartnerPresence((prev) => ({
+                    uid: prev?.uid || incoming.senderUid,
+                    name: prev?.name || incoming.senderName,
+                    lastSeenAt: incoming.createdAt || new Date().toISOString(),
+                    isActiveLastMinute: true,
+                  }));
+                }
                 setSending(false);
                 setError(null);
               }
               onMessageRef.current?.(incoming);
+            } else if (payload.type === 'contract:updated' && payload.contract) {
+              const contract = payload.contract as ServiceContractRecord;
+              if (
+                !payload.threadKey ||
+                payload.threadKey === activeThreadRef.current ||
+                contract.threadKey === activeThreadRef.current
+              ) {
+                onContractRef.current?.(contract);
+              }
             } else if (payload.type === 'error' && payload.error) {
               setError(String(payload.error));
               setSending(false);
@@ -163,7 +211,10 @@ export function useLiveChat({
         };
 
         ws.onclose = () => {
-          cleanupTimers();
+          if (heartbeatTimerRef.current !== null) {
+            window.clearInterval(heartbeatTimerRef.current);
+            heartbeatTimerRef.current = null;
+          }
           if (wsRef.current === ws) wsRef.current = null;
           if (!cancelled && mountedRef.current) {
             setConnected(false);
@@ -252,23 +303,27 @@ export function useLiveChat({
 
   return {
     messages,
+    partnerPresence,
     loading,
     sending,
     connected,
     error,
     sendMessage,
-    refresh: fetchThreadHistory,
+    refresh: () => fetchThreadHistory(false),
   };
 }
 
 export function useLiveChatInboxListener(
   enabled: boolean,
-  onIncomingMessage: (msg: ChatMessage) => void
+  onIncomingMessage: (msg: ChatMessage) => void,
+  onContractUpdated?: (contract: ServiceContractRecord) => void
 ) {
   const { dbUser, getAccessToken } = useAuth();
   const [connected, setConnected] = useState(false);
   const callbackRef = useRef(onIncomingMessage);
+  const contractCallbackRef = useRef(onContractUpdated);
   callbackRef.current = onIncomingMessage;
+  contractCallbackRef.current = onContractUpdated;
 
   useEffect(() => {
     if (!enabled || !dbUser) {
@@ -307,6 +362,8 @@ export function useLiveChatInboxListener(
             const payload = JSON.parse(event.data);
             if (payload.type === 'chat:message' && payload.message) {
               callbackRef.current(payload.message as ChatMessage);
+            } else if (payload.type === 'contract:updated' && payload.contract) {
+              contractCallbackRef.current?.(payload.contract as ServiceContractRecord);
             }
           } catch {
             /* ignore */

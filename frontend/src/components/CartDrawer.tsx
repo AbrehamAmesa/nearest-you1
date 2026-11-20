@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
 import type { CartItem, PlatformPolicy } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
+import { calculateReturnLoss, getListingPolicy } from '../utils/listingPolicy.ts';
 import { getPublicProviderLabel } from '../utils/sellerDisplay.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -55,9 +56,22 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         distanceKm: number;
         subtotal: number;
         discountSavings: number;
+        deliverySupported: boolean;
+        effectiveFulfillment: 'DELIVERY' | 'PICKUP';
         deliveryFee: number;
         taxAmount: number;
         total: number;
+        isFoodOrder: boolean;
+        immediateAcceptance: boolean;
+        estimatedReadyMinutes: number;
+        estimatedDeliveryMinutes: number;
+        returnPolicy: {
+          returnable: boolean;
+          returnWindowDays: number;
+          returnLossPercent: number;
+          returnLossFixedEtb: number;
+          deliveryFeeNonRefundableOnReturn: boolean;
+        };
       }
     >();
 
@@ -68,6 +82,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       const active = item.listing.discountPrice ? Number(item.listing.discountPrice) : orig;
       const lineSub = active * item.quantity;
       const lineSavings = item.listing.discountPrice ? (orig - active) * item.quantity : 0;
+      const itemPol = getListingPolicy(item.listing);
 
       if (!existing) {
         const dist = calculateDistanceKm(
@@ -76,34 +91,83 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           Number(item.business.latitude),
           Number(item.business.longitude)
         );
-        const deliveryFee =
-          fulfillmentType === 'DELIVERY'
-            ? Math.round(policy.deliveryBaseFee + dist * policy.deliveryPerKmRate)
-            : 0;
         map.set(bId, {
           business: item.business,
           items: [item],
           distanceKm: dist,
           subtotal: lineSub,
           discountSavings: lineSavings,
-          deliveryFee,
+          deliverySupported: itemPol.deliveryAvailable,
+          effectiveFulfillment: 'PICKUP',
+          deliveryFee: 0,
           taxAmount: 0,
           total: 0,
+          isFoodOrder: itemPol.isFood,
+          immediateAcceptance: !itemPol.isFood && itemPol.immediateAcceptance,
+          estimatedReadyMinutes: itemPol.estimatedReadyMinutes,
+          estimatedDeliveryMinutes: itemPol.estimatedDeliveryMinutes,
+          returnPolicy: {
+            returnable: itemPol.returnable,
+            returnWindowDays: itemPol.returnWindowDays,
+            returnLossPercent: itemPol.returnLossPercent,
+            returnLossFixedEtb: itemPol.returnLossFixedEtb,
+            deliveryFeeNonRefundableOnReturn: itemPol.deliveryFeeNonRefundableOnReturn,
+          },
         });
       } else {
         existing.items.push(item);
         existing.subtotal += lineSub;
         existing.discountSavings += lineSavings;
+        existing.deliverySupported = existing.deliverySupported && itemPol.deliveryAvailable;
+        existing.isFoodOrder = existing.isFoodOrder || itemPol.isFood;
+        existing.immediateAcceptance =
+          !existing.isFoodOrder && existing.immediateAcceptance && itemPol.immediateAcceptance;
+        existing.estimatedReadyMinutes = Math.max(
+          existing.estimatedReadyMinutes,
+          itemPol.estimatedReadyMinutes
+        );
+        existing.estimatedDeliveryMinutes = Math.max(
+          existing.estimatedDeliveryMinutes,
+          itemPol.estimatedDeliveryMinutes
+        );
+        existing.returnPolicy = {
+          returnable: existing.returnPolicy.returnable && itemPol.returnable,
+          returnWindowDays: Math.min(
+            existing.returnPolicy.returnWindowDays || itemPol.returnWindowDays,
+            itemPol.returnWindowDays
+          ),
+          returnLossPercent: Math.max(
+            existing.returnPolicy.returnLossPercent,
+            itemPol.returnLossPercent
+          ),
+          returnLossFixedEtb: Math.max(
+            existing.returnPolicy.returnLossFixedEtb,
+            itemPol.returnLossFixedEtb
+          ),
+          deliveryFeeNonRefundableOnReturn:
+            existing.returnPolicy.deliveryFeeNonRefundableOnReturn ||
+            itemPol.deliveryFeeNonRefundableOnReturn,
+        };
       }
     }
 
     return Array.from(map.values()).map((g) => {
+      const effectiveFulfillment: 'DELIVERY' | 'PICKUP' =
+        fulfillmentType === 'DELIVERY' && g.deliverySupported ? 'DELIVERY' : 'PICKUP';
+      const deliveryFee =
+        effectiveFulfillment === 'DELIVERY'
+          ? Math.round(policy.deliveryBaseFee + g.distanceKm * policy.deliveryPerKmRate)
+          : 0;
       const taxAmount = Math.round(g.subtotal * (policy.taxRatePercent / 100) * 100) / 100;
-      const total = Math.round((g.subtotal + g.deliveryFee + taxAmount) * 100) / 100;
-      return { ...g, taxAmount, total };
+      const total = Math.round((g.subtotal + deliveryFee + taxAmount) * 100) / 100;
+      const returnLoss = calculateReturnLoss(g.subtotal, deliveryFee, g.returnPolicy, 1);
+      return { ...g, effectiveFulfillment, deliveryFee, taxAmount, total, returnLoss };
     });
   }, [items, userLat, userLng, fulfillmentType, policy]);
 
+  const anyGroupNeedsDeliveryAddress = vendorGroups.some(
+    (g) => g.effectiveFulfillment === 'DELIVERY'
+  );
   const grandTotal = vendorGroups.reduce((sum, g) => sum + g.total, 0);
 
   const handleCheckout = async () => {
@@ -112,7 +176,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       openAuthModal('signin');
       return;
     }
-    if (fulfillmentType === 'DELIVERY' && !deliveryAddress.trim()) {
+    if (anyGroupNeedsDeliveryAddress && !deliveryAddress.trim()) {
       setErrorMsg('Please provide your Addis Ababa delivery landmark or street address.');
       return;
     }
@@ -123,9 +187,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         paymentMethod,
         groups: vendorGroups.map((g) => ({
           businessId: g.business.id,
-          orderType: g.items[0].listing.listingType === 'FOOD' ? 'FOOD' : 'PRODUCT',
-          fulfillmentType,
-          deliveryAddress: fulfillmentType === 'PICKUP' ? `Pickup at ${g.business.landmark}` : deliveryAddress,
+          orderType: g.isFoodOrder ? 'FOOD' : 'PRODUCT',
+          fulfillmentType: g.effectiveFulfillment,
+          deliveryAddress:
+            g.effectiveFulfillment === 'PICKUP'
+              ? `Pickup at ${g.business.landmark}, ${g.business.subCity}`
+              : deliveryAddress,
           deliveryFee: g.deliveryFee,
           items: g.items.map((i) => ({
             listingId: i.listing.id,
@@ -217,7 +284,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </div>
               </div>
 
-              {fulfillmentType === 'DELIVERY' && (
+              {anyGroupNeedsDeliveryAddress && (
                 <div>
                   <label className="block text-xs font-medium text-[#172B3A]/75">
                     Delivery Landmark / Address ({subCityName})
@@ -319,7 +386,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       )}
                       <div className="flex justify-between text-[#172B3A]/70">
                         <span>
-                          Delivery ({fulfillmentType === 'DELIVERY' ? `${group.distanceKm} km` : 'Store Pickup'})
+                          Delivery (
+                          {group.effectiveFulfillment === 'DELIVERY'
+                            ? `${group.distanceKm} km`
+                            : 'Store Pickup'}
+                          )
                         </span>
                         <span className="font-mono tabular-nums">{formatEtb(group.deliveryFee)}</span>
                       </div>
@@ -331,6 +402,50 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         <span>Vendor order total</span>
                         <span className="font-mono tabular-nums">{formatEtb(group.total)}</span>
                       </div>
+                    </div>
+
+                    {/* Per-Vendor Acceptance, ETA & Unsatisfied Return Buyer-Loss Disclosure */}
+                    <div className="mt-3 space-y-1 rounded-lg border border-[#172B3A]/12 bg-white p-2.5 text-[11px] text-[#172B3A]/80">
+                      {!group.deliverySupported && (
+                        <p className="font-semibold text-amber-800">
+                          Without Delivery — Store Pickup Only at {group.business.landmark},{' '}
+                          {group.business.subCity}
+                        </p>
+                      )}
+                      <p>
+                        <strong className="text-[#172B3A]">Acceptance &amp; Time:</strong>{' '}
+                        {group.isFoodOrder
+                          ? `Food Order Request — Seller accepts & confirms prep (~${group.estimatedReadyMinutes}m) and delivery (~${group.estimatedDeliveryMinutes}m) clock time.`
+                          : group.immediateAcceptance
+                            ? `Immediate Acceptance — Ready in ~${group.estimatedReadyMinutes} min · Deliverable in ~${group.estimatedDeliveryMinutes} min.`
+                            : `Order Request — Seller reviews & confirms ready (~${group.estimatedReadyMinutes}m) and delivery (~${group.estimatedDeliveryMinutes}m) time.`}
+                      </p>
+                      <p>
+                        <strong className="text-[#172B3A]">If Unsatisfied (Return Loss):</strong>{' '}
+                        {group.returnPolicy.returnable ? (
+                          <>
+                            Returnable within {group.returnPolicy.returnWindowDays}d.{' '}
+                            <span className="font-mono tabular-nums">
+                              Item loss: {formatEtb(group.returnLoss.itemLossEtb)} ·{' '}
+                              {group.effectiveFulfillment === 'DELIVERY'
+                                ? group.returnPolicy.deliveryFeeNonRefundableOnReturn
+                                  ? `Delivery fee (${formatEtb(group.deliveryFee)}) non-refundable/lost`
+                                  : `Delivery fee (${formatEtb(group.deliveryFee)}) refunded`
+                                : 'No delivery fee'}
+                              {' · '}
+                              Total buyer loss:{' '}
+                              <strong className="text-[#172B3A]">
+                                {formatEtb(group.returnLoss.totalLossEtb)}
+                              </strong>{' '}
+                              (Refund: {formatEtb(group.returnLoss.refundEtb)})
+                            </span>
+                          </>
+                        ) : (
+                          <span className="font-semibold text-red-700">
+                            Non-Returnable (Final Sale) — Buyer loses 100% ({formatEtb(group.returnLoss.totalLossEtb)})
+                          </span>
+                        )}
+                      </p>
                     </div>
                   </div>
                 ))}

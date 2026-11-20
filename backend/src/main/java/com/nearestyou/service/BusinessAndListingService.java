@@ -32,6 +32,7 @@ public class BusinessAndListingService {
     private final ReviewRepository reviewRepo;
     private final CategoryDocumentRequirementRepository requirementRepo;
     private final AuditLogRepository auditLogRepo;
+    private final ServiceContractRepository contractRepo;
     private final MandatoryPricingValidator pricingValidator;
     private final GeoDistanceService geoDistanceService;
     private final UserSyncService userSyncService;
@@ -49,6 +50,7 @@ public class BusinessAndListingService {
             ReviewRepository reviewRepo,
             CategoryDocumentRequirementRepository requirementRepo,
             AuditLogRepository auditLogRepo,
+            ServiceContractRepository contractRepo,
             MandatoryPricingValidator pricingValidator,
             GeoDistanceService geoDistanceService,
             UserSyncService userSyncService
@@ -65,6 +67,7 @@ public class BusinessAndListingService {
         this.reviewRepo = reviewRepo;
         this.requirementRepo = requirementRepo;
         this.auditLogRepo = auditLogRepo;
+        this.contractRepo = contractRepo;
         this.pricingValidator = pricingValidator;
         this.geoDistanceService = geoDistanceService;
         this.userSyncService = userSyncService;
@@ -86,12 +89,14 @@ public class BusinessAndListingService {
         List<JobApplication> scopedApps = bizIds.isEmpty() ? List.of() : appRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds);
         List<CommissionRecord> scopedCommissions = bizIds.isEmpty() ? List.of() : commissionRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds);
         List<Review> scopedReviews = bizIds.isEmpty() ? List.of() : reviewRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds);
+        List<ServiceContract> scopedContracts = bizIds.isEmpty() ? List.of() : contractRepo.findByBusinessIdInOrderByUpdatedAtDesc(bizIds);
         ProviderRegistration reg = providerRepo.findFirstByUserUidOrderByUpdatedAtDesc(principal.uid()).orElse(null);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ownedBusinesses", visibleBusinesses);
         out.put("orders", scopedOrders);
         out.put("bookings", scopedBookings);
+        out.put("contracts", scopedContracts);
         out.put("applications", scopedApps);
         out.put("commissions", scopedCommissions);
         out.put("reviews", scopedReviews);
@@ -471,7 +476,11 @@ public class BusinessAndListingService {
                 "skills", "experienceSummary", "availabilityNote", "cvUrl", "cvFileName",
                 "introVideoUrl", "companyLogoUrl", "variants", "deliveryOptions",
                 "schedule", "capacity", "employmentType", "contractType", "vehicleType",
-                "brand", "sku", "stockQuantity", "prepTimeMinutes", "durationMinutes"
+                "brand", "sku", "stockQuantity", "prepTimeMinutes", "durationMinutes",
+                "deliveryAvailable", "immediateAcceptance", "estimatedReadyMinutes",
+                "estimatedDeliveryMinutes", "deliveryWindowLabel", "returnable",
+                "returnWindowDays", "returnLossPercent", "returnLossFixedEtb",
+                "deliveryFeeNonRefundableOnReturn", "returnPolicyNote"
         );
         if (req.metadata() != null) {
             for (String key : safeMetadataKeys) {

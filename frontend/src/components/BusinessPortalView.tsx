@@ -48,9 +48,12 @@ import {
   MAX_PRODUCT_IMAGES,
   readFileAsDataUrl,
 } from '../utils/media.ts';
+import { calculateReturnLoss } from '../utils/listingPolicy.ts';
+import { formatEtaClock, formatLastSeenStatus } from '../utils/presence.ts';
 import { engagementApi } from '../api/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useLiveChatInboxListener } from '../hooks/useLiveChat.ts';
+import { ContractOfferSection } from './ContractOfferSection.tsx';
 import { ListingVisual } from './ListingVisual.tsx';
 import { LiveChatDrawer, type ActiveChatTarget } from './LiveChatDrawer.tsx';
 import { LiveChatPanel } from './LiveChatPanel.tsx';
@@ -109,6 +112,13 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
   const [chatDrawerTarget, setChatDrawerTarget] = useState<ActiveChatTarget | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [contractRefreshSignal, setContractRefreshSignal] = useState(0);
+
+  // Per-order seller acceptance ETA & rejection inputs
+  const [orderReadyMins, setOrderReadyMins] = useState<Record<number, string>>({});
+  const [orderDeliveryMins, setOrderDeliveryMins] = useState<Record<number, string>>({});
+  const [orderRejectReason, setOrderRejectReason] = useState<Record<number, string>>({});
 
   // Real-time location broadcasting state
   const [pingingLocation, setPingingLocation] = useState(false);
@@ -149,6 +159,16 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   const [cvUrl, setCvUrl] = useState('');
   const [cvFileName, setCvFileName] = useState('');
   const [introVideoUrl, setIntroVideoUrl] = useState('');
+  const [deliveryAvailable, setDeliveryAvailable] = useState(true);
+  const [immediateAcceptance, setImmediateAcceptance] = useState(true);
+  const [estimatedReadyMinutes, setEstimatedReadyMinutes] = useState('15');
+  const [estimatedDeliveryMinutes, setEstimatedDeliveryMinutes] = useState('45');
+  const [returnable, setReturnable] = useState(true);
+  const [returnWindowDays, setReturnWindowDays] = useState('3');
+  const [returnLossPercent, setReturnLossPercent] = useState('0');
+  const [returnLossFixedEtb, setReturnLossFixedEtb] = useState('0');
+  const [deliveryFeeNonRefundableOnReturn, setDeliveryFeeNonRefundableOnReturn] = useState(true);
+  const [returnPolicyNote, setReturnPolicyNote] = useState('');
   const [mediaBusy, setMediaBusy] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationSuccess, setValidationSuccess] = useState<string | null>(null);
@@ -180,6 +200,11 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     isAdmin || dbUser?.roles?.some((r) => governance.allowedApproverRoles.includes(r))
   );
 
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 15000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const loadThreadsOnly = async () => {
     if (!firebaseUser) return;
     try {
@@ -192,9 +217,16 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     }
   };
 
-  useLiveChatInboxListener(Boolean(firebaseUser), () => {
-    loadThreadsOnly();
-  });
+  useLiveChatInboxListener(
+    Boolean(firebaseUser),
+    () => {
+      loadThreadsOnly();
+    },
+    () => {
+      setContractRefreshSignal((n) => n + 1);
+      loadThreadsOnly();
+    }
+  );
 
   const loadPortalData = async () => {
     if (!firebaseUser) return;
@@ -483,6 +515,30 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     if (isJobMode && companyLogoUrl.trim()) {
       metadataPayload.companyLogoUrl = companyLogoUrl.trim();
     }
+    if (isProductMode && (listingType === 'PRODUCT' || listingType === 'FOOD')) {
+      const readyMin = Math.max(5, Math.round(Number(estimatedReadyMinutes) || 15));
+      const delivMin = Math.max(readyMin, Math.round(Number(estimatedDeliveryMinutes) || 45));
+      metadataPayload.deliveryAvailable = deliveryAvailable;
+      metadataPayload.immediateAcceptance =
+        listingType === 'FOOD' ? false : immediateAcceptance;
+      metadataPayload.estimatedReadyMinutes = readyMin;
+      metadataPayload.estimatedDeliveryMinutes = delivMin;
+      metadataPayload.returnable = returnable;
+      metadataPayload.returnWindowDays = returnable
+        ? Math.max(1, Math.round(Number(returnWindowDays) || 3))
+        : 0;
+      metadataPayload.returnLossPercent = returnable
+        ? Math.min(100, Math.max(0, Number(returnLossPercent) || 0))
+        : 100;
+      metadataPayload.returnLossFixedEtb = returnable
+        ? Math.max(0, Number(returnLossFixedEtb) || 0)
+        : 0;
+      metadataPayload.deliveryFeeNonRefundableOnReturn =
+        !returnable || deliveryFeeNonRefundableOnReturn;
+      if (returnPolicyNote.trim()) {
+        metadataPayload.returnPolicyNote = returnPolicyNote.trim();
+      }
+    }
     if (isWorkforceMode) {
       if (cvUrl.trim()) {
         metadataPayload.cvUrl = cvUrl.trim();
@@ -543,17 +599,38 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     setCvUrl('');
     setCvFileName('');
     setIntroVideoUrl('');
+    setReturnPolicyNote('');
     onRefreshCatalog();
   };
 
-  const handleUpdateOrderStatus = async (orderId: number, orderStatus: string) => {
+  const handleUpdateOrderStatus = async (
+    orderId: number,
+    orderStatus: string,
+    extra?: {
+      estimatedReadyMinutes?: number;
+      estimatedDeliveryMinutes?: number;
+      rejectionReason?: string;
+    }
+  ) => {
     const res = await authFetch(`/api/v1/orders/${orderId}/status`, {
       method: 'POST',
-      body: JSON.stringify({ orderStatus }),
+      body: JSON.stringify({
+        orderStatus,
+        ...(extra?.estimatedReadyMinutes !== undefined
+          ? { estimatedReadyMinutes: extra.estimatedReadyMinutes }
+          : {}),
+        ...(extra?.estimatedDeliveryMinutes !== undefined
+          ? { estimatedDeliveryMinutes: extra.estimatedDeliveryMinutes }
+          : {}),
+        ...(extra?.rejectionReason ? { rejectionReason: extra.rejectionReason } : {}),
+      }),
     });
     if (res.ok) {
       onNotify(`Order status updated to ${orderStatus}.`);
       loadPortalData();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      onNotify(err.error || 'Could not update order status.');
     }
   };
 
@@ -1612,6 +1689,170 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
               </div>
             </div>
 
+            {isProductMode && (listingType === 'PRODUCT' || listingType === 'FOOD') && (
+              <div className="space-y-3 rounded-xl border border-[#172B3A]/12 bg-[#F4F6F5]/65 p-3.5 text-xs">
+                <p className="font-bold text-[#172B3A]">
+                  Delivery Availability, Acceptance Time &amp; Unsatisfied Return Policy
+                </p>
+
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                      Delivery Support
+                    </label>
+                    <select
+                      value={deliveryAvailable ? 'WITH_DELIVERY' : 'PICKUP_ONLY'}
+                      onChange={(e) => setDeliveryAvailable(e.target.value === 'WITH_DELIVERY')}
+                      className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 text-xs"
+                    >
+                      <option value="WITH_DELIVERY">With Delivery</option>
+                      <option value="PICKUP_ONLY">Without Delivery (Pickup Only)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                      Order Acceptance
+                    </label>
+                    {listingType === 'FOOD' ? (
+                      <p className="mt-1.5 text-[11px] font-medium text-amber-800">
+                        Food Order Request (Seller accepts &amp; sets time)
+                      </p>
+                    ) : (
+                      <select
+                        value={immediateAcceptance ? 'IMMEDIATE' : 'REQUEST'}
+                        onChange={(e) => setImmediateAcceptance(e.target.value === 'IMMEDIATE')}
+                        className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 text-xs"
+                      >
+                        <option value="IMMEDIATE">Immediate Acceptance</option>
+                        <option value="REQUEST">Order Request (Seller Accepts)</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                      Approx. Ready Time (min)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      value={estimatedReadyMinutes}
+                      onChange={(e) => setEstimatedReadyMinutes(e.target.value)}
+                      className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 font-mono text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                      Approx. Delivery Time (min)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      disabled={!deliveryAvailable}
+                      value={estimatedDeliveryMinutes}
+                      onChange={(e) => setEstimatedDeliveryMinutes(e.target.value)}
+                      className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 font-mono text-xs disabled:bg-slate-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2 border-t border-[#172B3A]/10 pt-2">
+                  <label className="block text-[11px] font-medium text-[#172B3A]/75">
+                    Unsatisfied Buyer Return Policy
+                  </label>
+                  <select
+                    value={returnable ? 'RETURNABLE' : 'NON_RETURNABLE'}
+                    onChange={(e) => setReturnable(e.target.value === 'RETURNABLE')}
+                    className="h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 text-xs"
+                  >
+                    <option value="RETURNABLE">Can Be Returned (Specify Loss Below)</option>
+                    <option value="NON_RETURNABLE">Cannot Be Returned (Final Sale — 100% Loss)</option>
+                  </select>
+
+                  {returnable && (
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <div>
+                        <label className="block text-[10px] font-medium text-[#172B3A]/70">
+                          Window (Days)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={returnWindowDays}
+                          onChange={(e) => setReturnWindowDays(e.target.value)}
+                          className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-medium text-[#172B3A]/70">
+                          Buyer Loss (%)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={returnLossPercent}
+                          onChange={(e) => setReturnLossPercent(e.target.value)}
+                          className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-medium text-[#172B3A]/70">
+                          Fixed Loss (ETB)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={returnLossFixedEtb}
+                          onChange={(e) => setReturnLossFixedEtb(e.target.value)}
+                          className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2 font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-[11px] font-medium text-[#172B3A]">
+                    <input
+                      type="checkbox"
+                      checked={!returnable || deliveryFeeNonRefundableOnReturn}
+                      disabled={!returnable}
+                      onChange={(e) => setDeliveryFeeNonRefundableOnReturn(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-[#176B52]"
+                    />
+                    Buyer loses delivery fee if returned unsatisfied
+                  </label>
+
+                  <input
+                    type="text"
+                    value={returnPolicyNote}
+                    onChange={(e) => setReturnPolicyNote(e.target.value)}
+                    placeholder="Return condition note (optional)"
+                    className="h-9 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 text-xs"
+                  />
+
+                  {(() => {
+                    const sampleItem = Number(discountPrice || basePrice) || 0;
+                    const sampleDeliv = deliveryAvailable ? 120 : 0;
+                    const loss = calculateReturnLoss(sampleItem, sampleDeliv, {
+                      returnable,
+                      returnLossPercent: Number(returnLossPercent) || 0,
+                      returnLossFixedEtb: Number(returnLossFixedEtb) || 0,
+                      deliveryFeeNonRefundableOnReturn:
+                        !returnable || deliveryFeeNonRefundableOnReturn,
+                    });
+                    return (
+                      <p className="rounded bg-white px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-[#172B3A]/80 border border-[#172B3A]/10">
+                        Sample return loss (1 unit @ {formatEtb(sampleItem)} + {formatEtb(sampleDeliv)} delivery):
+                        Buyer loses {formatEtb(loss.totalLossEtb)} · Refund {formatEtb(loss.refundEtb)}
+                      </p>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-4 text-xs">
               <label className="inline-flex items-center gap-1.5">
                 <input
@@ -1811,57 +2052,167 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                 No vendor orders placed yet.
               </div>
             ) : (
-              orders.map((o) => (
-                <div key={o.id} className="rounded-xl border border-[#172B3A]/10 bg-white p-4 text-xs space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono font-bold text-[#172B3A]">{o.orderNumber}</span>
-                    <span className="font-mono font-bold text-[#176B52]">{formatEtb(o.totalAmount)}</span>
-                  </div>
-                  <p className="text-[#172B3A]/75">
-                    {o.customerName} · {o.deliveryAddress} · <strong>{o.orderStatus}</strong>
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setChatDrawerTarget({
-                          threadKey: `order:${o.id}`,
-                          orderId: o.id,
-                          businessId: o.businessId,
-                          recipientUid: o.customerUid,
-                          title: `Order ${o.orderNumber} · Live Chat`,
-                          subtitle: o.customerName,
-                        })
-                      }
-                      className="inline-flex min-h-[38px] items-center gap-1.5 rounded bg-[#176B52] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
-                    >
-                      <MessageSquare className="h-3.5 w-3.5" />
-                      Live Chat
-                    </button>
-                    {['PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETED'].map((st) => (
+              orders.map((o) => {
+                const isPendingRequest = o.orderStatus === 'REQUESTED' || o.orderStatus === 'PENDING';
+                const readyMinVal =
+                  orderReadyMins[o.id] ?? String(o.estimatedReadyMinutes ?? (o.orderType === 'FOOD' ? 25 : 15));
+                const deliveryMinVal =
+                  orderDeliveryMins[o.id] ?? String(o.estimatedDeliveryMinutes ?? (o.orderType === 'FOOD' ? 45 : 60));
+                const rejectReasonVal = orderRejectReason[o.id] ?? '';
+                const snap = o.returnPolicySnapshot;
+
+                return (
+                  <div key={o.id} className="rounded-xl border border-[#172B3A]/10 bg-white p-4 text-xs space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono font-bold text-[#172B3A]">{o.orderNumber}</span>
+                      <span className="font-mono font-bold text-[#176B52]">{formatEtb(o.totalAmount)}</span>
+                    </div>
+                    <p className="text-[#172B3A]/75">
+                      {o.customerName} · {o.fulfillmentType} ({o.deliveryAddress}) ·{' '}
+                      <strong className="text-[#176B52]">{o.orderStatus}</strong>
+                    </p>
+                    <p className="font-mono text-[11px] tabular-nums text-[#172B3A]/70">
+                      {o.immediateAcceptance ? 'Immediate Acceptance' : 'Order Request'} · Ready:{' '}
+                      {formatEtaClock(o.estimatedReadyAt, o.estimatedReadyMinutes)}
+                      {o.fulfillmentType === 'DELIVERY' &&
+                        ` · Delivery: ${formatEtaClock(o.estimatedDeliveryAt, o.estimatedDeliveryMinutes)}`}
+                    </p>
+                    {snap && (
+                      <p className="text-[11px] text-[#172B3A]/65">
+                        Return Policy:{' '}
+                        {snap.returnable
+                          ? `${snap.returnWindowDays}d · Loss ${formatEtb(snap.estimatedTotalLossOnReturnEtb ?? 0)}${
+                              snap.deliveryFeeNonRefundableOnReturn ? ' (loses delivery fee)' : ''
+                            }`
+                          : 'Non-Returnable'}
+                      </p>
+                    )}
+                    {o.rejectionReason && (
+                      <p className="text-[11px] font-medium text-red-700">
+                        Rejected: {o.rejectionReason}
+                      </p>
+                    )}
+
+                    {isPendingRequest && (
+                      <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+                        <p className="font-semibold text-amber-950">
+                          Review Order Request &amp; Confirm Ready / Delivery Time
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-medium text-[#172B3A]/75">
+                              Ready in (min)
+                            </label>
+                            <input
+                              type="number"
+                              min={5}
+                              value={readyMinVal}
+                              onChange={(e) =>
+                                setOrderReadyMins((p) => ({ ...p, [o.id]: e.target.value }))
+                              }
+                              className="mt-0.5 h-8 w-full rounded border border-[#172B3A]/20 bg-white px-2 font-mono text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-medium text-[#172B3A]/75">
+                              Deliverable in (min)
+                            </label>
+                            <input
+                              type="number"
+                              min={5}
+                              value={deliveryMinVal}
+                              onChange={(e) =>
+                                setOrderDeliveryMins((p) => ({ ...p, [o.id]: e.target.value }))
+                              }
+                              className="mt-0.5 h-8 w-full rounded border border-[#172B3A]/20 bg-white px-2 font-mono text-xs"
+                            />
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={rejectReasonVal}
+                          onChange={(e) =>
+                            setOrderRejectReason((p) => ({ ...p, [o.id]: e.target.value }))
+                          }
+                          placeholder="Optional rejection reason..."
+                          className="h-8 w-full rounded border border-[#172B3A]/20 bg-white px-2 text-xs"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUpdateOrderStatus(o.id, 'ACCEPTED', {
+                                estimatedReadyMinutes: Math.max(5, Number(readyMinVal) || 20),
+                                estimatedDeliveryMinutes: Math.max(5, Number(deliveryMinVal) || 45),
+                              })
+                            }
+                            className="min-h-[36px] rounded bg-[#176B52] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
+                          >
+                            Accept Order
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleUpdateOrderStatus(o.id, 'REJECTED', {
+                                rejectionReason: rejectReasonVal.trim() || 'Declined by seller',
+                              })
+                            }
+                            className="min-h-[36px] rounded border border-red-200 bg-white px-3 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
                       <button
-                        key={st}
                         type="button"
-                        onClick={() => handleUpdateOrderStatus(o.id, st)}
-                        className="min-h-[38px] rounded border border-[#172B3A]/15 px-2.5 py-1 text-[11px] font-medium hover:bg-[#F4F6F5]"
+                        onClick={() =>
+                          setChatDrawerTarget({
+                            threadKey: `order:${o.id}`,
+                            orderId: o.id,
+                            businessId: o.businessId,
+                            recipientUid: o.customerUid,
+                            title: `Order ${o.orderNumber} · Live Chat`,
+                            subtitle: o.customerName,
+                          })
+                        }
+                        className="inline-flex min-h-[38px] items-center gap-1.5 rounded bg-[#176B52] px-3 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
                       >
-                        {st.replace(/_/g, ' ')}
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        Live Chat
                       </button>
-                    ))}
+                      {!isPendingRequest &&
+                        o.orderStatus !== 'REJECTED' &&
+                        o.orderStatus !== 'CANCELLED' &&
+                        o.orderStatus !== 'COMPLETED' &&
+                        ['PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETED'].map((st) => (
+                          <button
+                            key={st}
+                            type="button"
+                            onClick={() => handleUpdateOrderStatus(o.id, st)}
+                            className="min-h-[38px] rounded border border-[#172B3A]/15 px-2.5 py-1 text-[11px] font-medium hover:bg-[#F4F6F5]"
+                          >
+                            {st.replace(/_/g, ' ')}
+                          </button>
+                        ))}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
+
           <div className="hidden md:block overflow-x-auto rounded-2xl border border-[#172B3A]/10 bg-white">
-            <table className="w-full min-w-[700px] text-left text-xs">
+            <table className="w-full min-w-[780px] text-left text-xs">
               <thead className="border-b border-[#172B3A]/10 bg-[#F4F6F5] text-[#172B3A]/70">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">Order Ref</th>
-                  <th className="px-4 py-3 font-semibold">Customer</th>
+                  <th className="px-4 py-3 font-semibold">Order Ref &amp; Policy</th>
+                  <th className="px-4 py-3 font-semibold">Customer &amp; ETA</th>
                   <th className="px-4 py-3 font-semibold">Total (ETB)</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold text-right">Fulfillment & Live Chat</th>
+                  <th className="px-4 py-3 font-semibold text-right">Acceptance, Fulfillment &amp; Chat</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#172B3A]/10">
@@ -1872,49 +2223,163 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  orders.map((o) => (
-                    <tr key={o.id}>
-                      <td className="px-4 py-3 font-mono font-semibold">{o.orderNumber}</td>
-                      <td className="px-4 py-3">
-                        {o.customerName} · {o.deliveryAddress}
-                      </td>
-                      <td className="px-4 py-3 font-mono font-semibold tabular-nums">
-                        {formatEtb(o.totalAmount)}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-[#176B52]">{o.orderStatus}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setChatDrawerTarget({
-                                threadKey: `order:${o.id}`,
-                                orderId: o.id,
-                                businessId: o.businessId,
-                                recipientUid: o.customerUid,
-                                title: `Order ${o.orderNumber} · Live Chat`,
-                                subtitle: o.customerName,
-                              })
-                            }
-                            className="inline-flex items-center gap-1 rounded bg-[#176B52] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
-                          >
-                            <MessageSquare className="h-3 w-3" />
-                            Live Chat
-                          </button>
-                          {['PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETED'].map((st) => (
-                            <button
-                              key={st}
-                              type="button"
-                              onClick={() => handleUpdateOrderStatus(o.id, st)}
-                              className="rounded border border-[#172B3A]/15 px-2 py-1 text-[11px] font-medium hover:bg-[#F4F6F5]"
-                            >
-                              {st.replace(/_/g, ' ')}
-                            </button>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  orders.map((o) => {
+                    const isPendingRequest =
+                      o.orderStatus === 'REQUESTED' || o.orderStatus === 'PENDING';
+                    const readyMinVal =
+                      orderReadyMins[o.id] ??
+                      String(o.estimatedReadyMinutes ?? (o.orderType === 'FOOD' ? 25 : 15));
+                    const deliveryMinVal =
+                      orderDeliveryMins[o.id] ??
+                      String(o.estimatedDeliveryMinutes ?? (o.orderType === 'FOOD' ? 45 : 60));
+                    const rejectReasonVal = orderRejectReason[o.id] ?? '';
+                    const snap = o.returnPolicySnapshot;
+
+                    return (
+                      <tr key={o.id} className="align-top">
+                        <td className="px-4 py-3">
+                          <p className="font-mono font-semibold text-[#172B3A]">{o.orderNumber}</p>
+                          <p className="mt-0.5 text-[11px] text-[#172B3A]/65">
+                            {o.immediateAcceptance ? 'Immediate Acceptance' : 'Order Request'} ·{' '}
+                            {o.orderType}
+                          </p>
+                          {snap && (
+                            <p className="mt-0.5 text-[10px] text-[#172B3A]/60">
+                              {snap.returnable
+                                ? `Return ${snap.returnWindowDays}d (Loss ${formatEtb(snap.estimatedTotalLossOnReturnEtb ?? 0)})`
+                                : 'Non-Returnable'}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-[#172B3A]">
+                            {o.customerName} · {o.fulfillmentType}
+                          </p>
+                          <p className="text-[11px] text-[#172B3A]/65">{o.deliveryAddress}</p>
+                          <p className="mt-0.5 font-mono text-[11px] tabular-nums text-[#176B52]">
+                            Ready: {formatEtaClock(o.estimatedReadyAt, o.estimatedReadyMinutes)}
+                            {o.fulfillmentType === 'DELIVERY' &&
+                              ` · Delivery: ${formatEtaClock(o.estimatedDeliveryAt, o.estimatedDeliveryMinutes)}`}
+                          </p>
+                          {o.rejectionReason && (
+                            <p className="mt-0.5 text-[11px] text-red-700">
+                              Reason: {o.rejectionReason}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 font-mono font-semibold tabular-nums">
+                          {formatEtb(o.totalAmount)}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-[#176B52]">{o.orderStatus}</td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="inline-flex flex-col items-end gap-2">
+                            {isPendingRequest && (
+                              <div className="flex flex-wrap items-center justify-end gap-1.5 rounded-lg border border-amber-200 bg-amber-50/70 p-2">
+                                <label className="text-[10px] text-[#172B3A]/75">
+                                  Ready
+                                  <input
+                                    type="number"
+                                    min={5}
+                                    value={readyMinVal}
+                                    onChange={(e) =>
+                                      setOrderReadyMins((p) => ({ ...p, [o.id]: e.target.value }))
+                                    }
+                                    className="ml-1 h-7 w-14 rounded border border-[#172B3A]/20 bg-white px-1.5 font-mono text-[11px]"
+                                  />
+                                  m
+                                </label>
+                                <label className="text-[10px] text-[#172B3A]/75">
+                                  Deliv
+                                  <input
+                                    type="number"
+                                    min={5}
+                                    value={deliveryMinVal}
+                                    onChange={(e) =>
+                                      setOrderDeliveryMins((p) => ({ ...p, [o.id]: e.target.value }))
+                                    }
+                                    className="ml-1 h-7 w-14 rounded border border-[#172B3A]/20 bg-white px-1.5 font-mono text-[11px]"
+                                  />
+                                  m
+                                </label>
+                                <input
+                                  type="text"
+                                  value={rejectReasonVal}
+                                  onChange={(e) =>
+                                    setOrderRejectReason((p) => ({ ...p, [o.id]: e.target.value }))
+                                  }
+                                  placeholder="Reject reason"
+                                  className="h-7 w-28 rounded border border-[#172B3A]/20 bg-white px-2 text-[11px]"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUpdateOrderStatus(o.id, 'ACCEPTED', {
+                                      estimatedReadyMinutes: Math.max(5, Number(readyMinVal) || 20),
+                                      estimatedDeliveryMinutes: Math.max(
+                                        5,
+                                        Number(deliveryMinVal) || 45
+                                      ),
+                                    })
+                                  }
+                                  className="rounded bg-[#176B52] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
+                                >
+                                  Accept Order
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUpdateOrderStatus(o.id, 'REJECTED', {
+                                      rejectionReason:
+                                        rejectReasonVal.trim() || 'Declined by seller',
+                                    })
+                                  }
+                                  className="rounded border border-red-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            )}
+
+                            <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setChatDrawerTarget({
+                                    threadKey: `order:${o.id}`,
+                                    orderId: o.id,
+                                    businessId: o.businessId,
+                                    recipientUid: o.customerUid,
+                                    title: `Order ${o.orderNumber} · Live Chat`,
+                                    subtitle: o.customerName,
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 rounded bg-[#176B52] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                                Live Chat
+                              </button>
+                              {!isPendingRequest &&
+                                o.orderStatus !== 'REJECTED' &&
+                                o.orderStatus !== 'CANCELLED' &&
+                                o.orderStatus !== 'COMPLETED' &&
+                                ['PREPARING', 'READY', 'OUT_FOR_DELIVERY', 'COMPLETED'].map(
+                                  (st) => (
+                                    <button
+                                      key={st}
+                                      type="button"
+                                      onClick={() => handleUpdateOrderStatus(o.id, st)}
+                                      className="rounded border border-[#172B3A]/15 px-2 py-1 text-[11px] font-medium hover:bg-[#F4F6F5]"
+                                    >
+                                      {st.replace(/_/g, ' ')}
+                                    </button>
+                                  )
+                                )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -1923,7 +2388,16 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
       )}
 
       {tab === 'BOOKINGS' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <ContractOfferSection
+            isOwner
+            refreshSignal={contractRefreshSignal}
+            onContractChanged={() => {
+              setContractRefreshSignal((n) => n + 1);
+              loadPortalData();
+            }}
+          />
+
           <div className="md:hidden space-y-3">
             {bookings.length === 0 ? (
               <div className="rounded-2xl border border-[#172B3A]/10 bg-white p-8 text-center text-xs text-[#172B3A]/60">
@@ -1952,12 +2426,13 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                           recipientUid: b.customerUid,
                           title: `${b.bookingReference} · Live Chat`,
                           subtitle: b.customerName,
+                          enableContracts: true,
                         })
                       }
                       className="inline-flex min-h-[38px] items-center gap-1.5 rounded bg-[#176B52] px-3 py-1.5 font-semibold text-white hover:bg-[#125641]"
                     >
                       <MessageSquare className="h-3.5 w-3.5" />
-                      Live Chat
+                      Live Chat &amp; Contracts
                     </button>
                     <button
                       type="button"
@@ -1999,7 +2474,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                   <th className="px-4 py-3 font-semibold">Schedule</th>
                   <th className="px-4 py-3 font-semibold">Agreed Price</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold text-right">Actions & Live Chat</th>
+                  <th className="px-4 py-3 font-semibold text-right">Actions &amp; Live Chat</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#172B3A]/10">
@@ -2033,12 +2508,13 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                                 recipientUid: b.customerUid,
                                 title: `${b.bookingReference} · Live Chat`,
                                 subtitle: b.customerName,
+                                enableContracts: true,
                               })
                             }
                             className="inline-flex items-center gap-1 rounded bg-[#176B52] px-2.5 py-1 font-semibold text-white hover:bg-[#125641]"
                           >
                             <MessageSquare className="h-3 w-3" />
-                            Live Chat
+                            Live Chat &amp; Contracts
                           </button>
                           <button
                             type="button"
@@ -2083,7 +2559,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
           <div className="min-w-0 space-y-2 rounded-2xl border border-[#172B3A]/10 bg-white p-3.5 sm:p-4 lg:col-span-5">
             <div className="flex items-center justify-between border-b border-[#172B3A]/10 pb-2.5">
               <h2 className="font-display text-sm font-bold text-[#172B3A]">
-                Client Inquiries & Order Live Chats ({threads.length})
+                Client Inquiries &amp; Order Live Chats ({threads.length})
               </h2>
               <button
                 type="button"
@@ -2102,6 +2578,11 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
               <div className="max-h-[440px] space-y-2 overflow-y-auto overflow-x-hidden pr-1">
                 {threads.map((th) => {
                   const active = selectedThreadKey === th.threadKey;
+                  const presence = formatLastSeenStatus(
+                    th.otherPartyLastSeenAt,
+                    th.otherPartyActiveLastMinute,
+                    nowTick
+                  );
                   return (
                     <button
                       key={th.threadKey}
@@ -2125,6 +2606,17 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                               : 'CONTACT'}
                         </span>
                       </div>
+                      <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[#172B3A]/65">
+                        <span
+                          aria-hidden="true"
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            presence.isActiveNow ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                          }`}
+                        />
+                        <span className={presence.isActiveNow ? 'font-semibold text-[#176B52]' : ''}>
+                          {presence.label}
+                        </span>
+                      </p>
                       {th.listingTitle && (
                         <p className="mt-0.5 truncate text-[11px] font-medium text-[#172B3A]/75">
                           {th.listingTitle}
@@ -2140,7 +2632,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
             )}
           </div>
 
-          <div className="min-w-0 lg:col-span-7">
+          <div className="min-w-0 space-y-4 lg:col-span-7">
             {(() => {
               const selected =
                 threads.find((th) => th.threadKey === selectedThreadKey) || threads[0];
@@ -2152,22 +2644,44 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                 );
               }
               return (
-                <LiveChatPanel
-                  threadKey={selected.threadKey}
-                  businessId={selected.businessId}
-                  listingId={selected.listingId}
-                  orderId={selected.orderId}
-                  bookingId={selected.bookingId}
-                  recipientUid={selected.otherPartyUid}
-                  title={`Reply to ${selected.otherPartyName || 'Client'}`}
-                  subtitle={
-                    selected.orderNumber
-                      ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
-                      : selected.listingTitle || selected.businessName
-                  }
-                  placeholder="Write a message to reply..."
-                  onMessageSentOrReceived={() => loadThreadsOnly()}
-                />
+                <>
+                  <LiveChatPanel
+                    threadKey={selected.threadKey}
+                    businessId={selected.businessId}
+                    listingId={selected.listingId}
+                    orderId={selected.orderId}
+                    bookingId={selected.bookingId}
+                    recipientUid={selected.otherPartyUid}
+                    title={`Reply to ${selected.otherPartyName || 'Client'}`}
+                    subtitle={
+                      selected.orderNumber
+                        ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
+                        : selected.listingTitle || selected.businessName
+                    }
+                    initialLastSeenAt={selected.otherPartyLastSeenAt}
+                    initialActiveLastMinute={selected.otherPartyActiveLastMinute}
+                    placeholder="Write a message to reply..."
+                    onMessageSentOrReceived={() => loadThreadsOnly()}
+                    onContractUpdated={() => setContractRefreshSignal((n) => n + 1)}
+                  />
+                  {!selected.orderId && (
+                    <ContractOfferSection
+                      threadKey={selected.threadKey}
+                      businessId={selected.businessId}
+                      listingId={selected.listingId}
+                      bookingId={selected.bookingId}
+                      recipientUid={selected.otherPartyUid}
+                      defaultTitle={selected.listingTitle || selected.businessName}
+                      isOwner
+                      compact
+                      refreshSignal={contractRefreshSignal}
+                      onContractChanged={() => {
+                        setContractRefreshSignal((n) => n + 1);
+                        loadThreadsOnly();
+                      }}
+                    />
+                  )}
+                </>
               );
             })()}
           </div>

@@ -70,7 +70,32 @@ public class CustomerOrder {
     private String paymentStatus = "SUCCESSFUL";
 
     @Column(name = "order_status", nullable = false)
-    private String orderStatus = "PENDING";
+    private String orderStatus = "REQUESTED";
+
+    @Column(name = "immediate_acceptance", nullable = false)
+    private boolean immediateAcceptance = false;
+
+    @Column(name = "estimated_ready_minutes")
+    private Integer estimatedReadyMinutes;
+
+    @Column(name = "estimated_delivery_minutes")
+    private Integer estimatedDeliveryMinutes;
+
+    @Column(name = "estimated_ready_at")
+    private Instant estimatedReadyAt;
+
+    @Column(name = "estimated_delivery_at")
+    private Instant estimatedDeliveryAt;
+
+    @Column(name = "accepted_at")
+    private Instant acceptedAt;
+
+    @Column(name = "rejection_reason", columnDefinition = "text")
+    private String rejectionReason;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "return_policy_snapshot", columnDefinition = "jsonb")
+    private Map<String, Object> returnPolicySnapshot;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
@@ -128,6 +153,30 @@ public class CustomerOrder {
 
     public String getOrderStatus() { return orderStatus; }
     public void setOrderStatus(String orderStatus) { this.orderStatus = orderStatus; }
+
+    public boolean isImmediateAcceptance() { return immediateAcceptance; }
+    public void setImmediateAcceptance(boolean immediateAcceptance) { this.immediateAcceptance = immediateAcceptance; }
+
+    public Integer getEstimatedReadyMinutes() { return estimatedReadyMinutes; }
+    public void setEstimatedReadyMinutes(Integer estimatedReadyMinutes) { this.estimatedReadyMinutes = estimatedReadyMinutes; }
+
+    public Integer getEstimatedDeliveryMinutes() { return estimatedDeliveryMinutes; }
+    public void setEstimatedDeliveryMinutes(Integer estimatedDeliveryMinutes) { this.estimatedDeliveryMinutes = estimatedDeliveryMinutes; }
+
+    public Instant getEstimatedReadyAt() { return estimatedReadyAt; }
+    public void setEstimatedReadyAt(Instant estimatedReadyAt) { this.estimatedReadyAt = estimatedReadyAt; }
+
+    public Instant getEstimatedDeliveryAt() { return estimatedDeliveryAt; }
+    public void setEstimatedDeliveryAt(Instant estimatedDeliveryAt) { this.estimatedDeliveryAt = estimatedDeliveryAt; }
+
+    public Instant getAcceptedAt() { return acceptedAt; }
+    public void setAcceptedAt(Instant acceptedAt) { this.acceptedAt = acceptedAt; }
+
+    public String getRejectionReason() { return rejectionReason; }
+    public void setRejectionReason(String rejectionReason) { this.rejectionReason = rejectionReason; }
+
+    public Map<String, Object> getReturnPolicySnapshot() { return returnPolicySnapshot; }
+    public void setReturnPolicySnapshot(Map<String, Object> returnPolicySnapshot) { this.returnPolicySnapshot = returnPolicySnapshot; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

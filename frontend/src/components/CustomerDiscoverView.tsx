@@ -44,6 +44,7 @@ import {
   getPublicProviderRoleLabel,
   isServiceGiverOrJobSeeker,
 } from '../utils/sellerDisplay.ts';
+import { getListingPolicy } from '../utils/listingPolicy.ts';
 import { catalogApi } from '../api/index.ts';
 import heroAddisMarketplaceImg from '../assets/images/hero_addis_marketplace_1794751692104.jpg';
 import { ImageSearchModal } from './ImageSearchModal.tsx';
@@ -337,10 +338,12 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
           if (discountedOnly && !listing.discountPrice) return false;
           if (deliveryOnly) {
             const opts = listing.metadata?.deliveryOptions || [];
+            const explicitlyDisabled = listing.metadata?.deliveryAvailable === false;
             const supportsDelivery =
-              opts.some((d) => d.toLowerCase().includes('delivery')) ||
-              listing.listingType === 'PRODUCT' ||
-              listing.listingType === 'FOOD';
+              !explicitlyDisabled &&
+              (opts.some((d) => d.toLowerCase().includes('delivery')) ||
+                listing.listingType === 'PRODUCT' ||
+                listing.listingType === 'FOOD');
             if (!supportsDelivery) return false;
           }
           return true;
@@ -371,10 +374,12 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
         if (discountedOnly && !item.discountPrice) return false;
         if (deliveryOnly) {
           const opts = item.metadata?.deliveryOptions || [];
+          const explicitlyDisabled = item.metadata?.deliveryAvailable === false;
           const supportsDelivery =
-            opts.some((d) => d.toLowerCase().includes('delivery')) ||
-            item.listingType === 'PRODUCT' ||
-            item.listingType === 'FOOD';
+            !explicitlyDisabled &&
+            (opts.some((d) => d.toLowerCase().includes('delivery')) ||
+              item.listingType === 'PRODUCT' ||
+              item.listingType === 'FOOD');
           if (!supportsDelivery) return false;
         }
 
@@ -800,6 +805,20 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                           {reason}
                         </p>
                       )}
+                      {isOrderable && (() => {
+                        const pol = getListingPolicy(listing);
+                        return (
+                          <p className="mt-0.5 truncate text-[10px] text-[#172B3A]/65">
+                            {pol.deliveryAvailable ? `With Delivery ~${pol.estimatedDeliveryMinutes}m` : 'Pickup Only'} ·{' '}
+                            {pol.isFood ? 'Order Request' : pol.immediateAcceptance ? 'Instant Accept' : 'Seller Accept'} ·{' '}
+                            {pol.returnable
+                              ? pol.returnLossPercent > 0 || pol.returnLossFixedEtb > 0
+                                ? `Return ${pol.returnWindowDays}d (-${pol.returnLossPercent}%${pol.returnLossFixedEtb > 0 ? `+${pol.returnLossFixedEtb} ETB` : ''})`
+                                : `Return ${pol.returnWindowDays}d`
+                              : 'Non-Returnable'}
+                          </p>
+                        );
+                      })()}
                     </div>
 
                     <div className="mt-2 flex items-center justify-between gap-2 border-t border-[#172B3A]/10 pt-2">
@@ -1350,6 +1369,35 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                                   ? t.faydaLiveVerified
                                   : biz.verificationStatus}
                             </p>
+                            {isOrderable && (() => {
+                              const pol = getListingPolicy(item);
+                              const returnText = pol.returnable
+                                ? `${pol.returnWindowDays}d return (${
+                                    pol.returnLossPercent > 0 || pol.returnLossFixedEtb > 0
+                                      ? `${pol.returnLossPercent}%${pol.returnLossFixedEtb > 0 ? `+${pol.returnLossFixedEtb} ETB` : ''} loss`
+                                      : '0% fee'
+                                  }${pol.deliveryAvailable && pol.deliveryFeeNonRefundableOnReturn ? ', loses delivery' : ''})`
+                                : 'Non-Returnable';
+                              return (
+                                <p className="mt-1 line-clamp-2 text-[11px] text-[#172B3A]/70">
+                                  <span className="font-semibold text-[#176B52]">
+                                    {pol.deliveryAvailable
+                                      ? `With Delivery (~${pol.estimatedDeliveryMinutes} min)`
+                                      : 'Without Delivery (Pickup Only)'}
+                                  </span>
+                                  {' · '}
+                                  <span>
+                                    {pol.isFood
+                                      ? 'Request & Accept'
+                                      : pol.immediateAcceptance
+                                        ? 'Immediate Accept'
+                                        : 'Seller Accept'}
+                                  </span>
+                                  {' · '}
+                                  <span>{returnText}</span>
+                                </p>
+                              );
+                            })()}
                             {(visualImageMatch || item.metadata?.cvUrl || item.metadata?.introVideoUrl) && (
                               <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-[#176B52]">
                                 {visualImageMatch && <span>Matched uploaded photo</span>}

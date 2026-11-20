@@ -492,31 +492,63 @@ function NearestYouWorkspace() {
   const isVerifiedProvider =
     dbUser?.providerVerificationStatus === 'VERIFIED' || Boolean(dbUser?.isAdmin);
 
-  useLiveChatInboxListener(Boolean(firebaseUser && dbUser), (incomingMsg) => {
-    if (!dbUser?.uid || incomingMsg.senderUid === dbUser.uid) return;
-    const ownsBusiness = businesses.some(
-      (b) => b.id === incomingMsg.businessId && b.ownerUid === dbUser.uid
-    );
-    const targetSection: AppSection =
-      ownsBusiness && isVerifiedProvider ? 'business' : 'activity';
-    pushNotification({
-      kind: 'message',
-      title: `New Message · ${incomingMsg.senderName}`,
-      message:
-        incomingMsg.body.length > 96
-          ? `${incomingMsg.body.slice(0, 93)}...`
-          : incomingMsg.body,
-      actionLabel: 'Open Messages',
-      actionTarget: targetSection,
-      onAction: () => {
-        setSelectedListing(null);
-        if (targetSection === 'business') {
-          setBusinessInitialTab('CATALOG');
-        }
-        setActiveSection(targetSection);
-      },
-    });
-  });
+  useEffect(() => {
+    if (!firebaseUser || !dbUser) return;
+    userApi.heartbeat().catch(() => {});
+    const timer = window.setInterval(() => {
+      userApi.heartbeat().catch(() => {});
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [firebaseUser, dbUser?.uid]);
+
+  useLiveChatInboxListener(
+    Boolean(firebaseUser && dbUser),
+    (incomingMsg) => {
+      if (!dbUser?.uid || incomingMsg.senderUid === dbUser.uid) return;
+      const ownsBusiness = businesses.some(
+        (b) => b.id === incomingMsg.businessId && b.ownerUid === dbUser.uid
+      );
+      const targetSection: AppSection =
+        ownsBusiness && isVerifiedProvider ? 'business' : 'activity';
+      pushNotification({
+        kind: 'message',
+        title: `New Message · ${incomingMsg.senderName}`,
+        message:
+          incomingMsg.body.length > 96
+            ? `${incomingMsg.body.slice(0, 93)}...`
+            : incomingMsg.body,
+        actionLabel: 'Open Messages',
+        actionTarget: targetSection,
+        onAction: () => {
+          setSelectedListing(null);
+          if (targetSection === 'business') {
+            setBusinessInitialTab('CATALOG');
+          }
+          setActiveSection(targetSection);
+        },
+      });
+    },
+    (contract) => {
+      if (!dbUser?.uid || contract.offeredByUid === dbUser.uid) return;
+      const ownsBusiness = dbUser.uid === contract.serviceGiverUid;
+      const targetSection: AppSection =
+        ownsBusiness && isVerifiedProvider ? 'business' : 'activity';
+      pushNotification({
+        kind: 'offer',
+        title: `Contract ${contract.status} · ${contract.contractReference}`,
+        message: `${contract.title} · ${Number(contract.agreedAmount).toLocaleString()} ETB (${contract.contractType.replace(/_/g, ' ')})`,
+        actionLabel: 'View Contract',
+        actionTarget: targetSection,
+        onAction: () => {
+          setSelectedListing(null);
+          if (targetSection === 'business') {
+            setBusinessInitialTab('CATALOG');
+          }
+          setActiveSection(targetSection);
+        },
+      });
+    }
+  );
 
   const handleOpenJobSeekerAdvertise = () => {
     if (!firebaseUser) {

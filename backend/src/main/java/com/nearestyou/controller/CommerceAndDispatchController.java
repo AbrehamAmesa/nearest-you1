@@ -46,7 +46,7 @@ public class CommerceAndDispatchController {
             @PathVariable Long id,
             @Valid @RequestBody UpdateOrderStatusRequest req
     ) {
-        return orderAndBookingService.updateOrderStatus(principal, id, req.orderStatus());
+        return orderAndBookingService.updateOrderStatus(principal, id, req);
     }
 
     @PostMapping("/bookings")

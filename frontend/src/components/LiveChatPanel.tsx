@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Send, ShieldAlert, Wifi, WifiOff, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useLiveChat } from '../hooks/useLiveChat.ts';
-import type { ChatMessage } from '../types/nearestyou.ts';
+import type { ChatMessage, ServiceContractRecord } from '../types/nearestyou.ts';
+import { formatLastSeenStatus } from '../utils/presence.ts';
 
 interface LiveChatPanelProps {
   threadKey: string;
@@ -15,11 +16,14 @@ interface LiveChatPanelProps {
   maskedTitle?: string;
   revealTitleOnMessage?: boolean;
   subtitle?: string;
+  initialLastSeenAt?: string | null;
+  initialActiveLastMinute?: boolean;
   placeholder?: string;
   compact?: boolean;
   onClose?: () => void;
   onMessageSent?: (text: string) => void;
   onMessageSentOrReceived?: (msg: ChatMessage) => void;
+  onContractUpdated?: (contract: ServiceContractRecord) => void;
 }
 
 export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
@@ -33,14 +37,18 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   maskedTitle,
   revealTitleOnMessage = false,
   subtitle,
+  initialLastSeenAt = null,
+  initialActiveLastMinute = false,
   placeholder = 'Write a message to reply...',
   compact = false,
   onClose,
   onMessageSent,
   onMessageSentOrReceived,
+  onContractUpdated,
 }) => {
   const { dbUser, firebaseUser, openAuthModal } = useAuth();
   const [draft, setDraft] = useState('');
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const isSelfRecipient = Boolean(
@@ -49,7 +57,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         (firebaseUser?.uid && recipientUid === firebaseUser.uid))
   );
 
-  const { messages, loading, sending, connected, error, sendMessage } = useLiveChat({
+  const { messages, partnerPresence, loading, sending, connected, error, sendMessage } = useLiveChat({
     threadKey,
     businessId,
     listingId,
@@ -58,7 +66,13 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     recipientUid,
     enabled: Boolean(dbUser && threadKey && !isSelfRecipient),
     onMessageReceived: onMessageSentOrReceived,
+    onContractUpdated,
   });
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 15000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -82,6 +96,11 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
 
   const displayHeaderTitle =
     revealTitleOnMessage && messages.length === 0 && maskedTitle ? maskedTitle : title;
+
+  const effectiveLastSeen = partnerPresence?.lastSeenAt ?? initialLastSeenAt;
+  const effectiveActiveLastMinute =
+    partnerPresence !== null ? partnerPresence.isActiveLastMinute : initialActiveLastMinute;
+  const presenceDisplay = formatLastSeenStatus(effectiveLastSeen, effectiveActiveLastMinute, nowTick);
 
   if (!dbUser) {
     return (
@@ -123,9 +142,25 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
             <MessageSquare className="h-4 w-4 shrink-0 text-emerald-300" />
             <h4 className="truncate text-xs font-bold sm:text-sm">{displayHeaderTitle}</h4>
           </div>
-          {subtitle && (
-            <p className="mt-0.5 truncate text-[11px] text-slate-300">{subtitle}</p>
-          )}
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-300">
+            <span className="inline-flex items-center gap-1.5 font-medium">
+              <span
+                aria-hidden="true"
+                className={`h-2 w-2 shrink-0 rounded-full ${
+                  presenceDisplay.isActiveNow ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'
+                }`}
+              />
+              <span className={presenceDisplay.isActiveNow ? 'text-emerald-200 font-semibold' : ''}>
+                {presenceDisplay.label}
+              </span>
+            </span>
+            {subtitle && (
+              <>
+                <span aria-hidden="true" className="text-slate-500">·</span>
+                <span className="truncate">{subtitle}</span>
+              </>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <span

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.nearestyou.entity.Message;
+import com.nearestyou.entity.ServiceContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -104,6 +105,42 @@ public class LiveChatBroker {
                 senderUid != null ? senderUid : "",
                 recipientUid != null ? recipientUid : "",
                 ownerUid != null ? ownerUid : ""
+        )) {
+            if (targetUid.isBlank()) continue;
+            Set<WebSocketSession> sessions = userSessions.get(targetUid);
+            if (sessions != null) {
+                for (WebSocketSession s : sessions) {
+                    if (s.isOpen() && delivered.add(s)) {
+                        sendToSession(s, envelope);
+                    }
+                }
+            }
+        }
+    }
+
+    public void broadcastContractEvent(ServiceContract contract, String clientUid, String serviceGiverUid) {
+        if (contract == null) return;
+        String threadKey = contract.getThreadKey();
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("type", "contract:updated");
+        envelope.put("threadKey", threadKey);
+        envelope.put("contract", contract);
+
+        Set<WebSocketSession> delivered = Collections.newSetFromMap(new IdentityHashMap<>());
+        if (threadKey != null && !threadKey.isBlank()) {
+            Set<WebSocketSession> room = threadRooms.get(threadKey);
+            if (room != null) {
+                for (WebSocketSession s : room) {
+                    if (s.isOpen() && delivered.add(s)) {
+                        sendToSession(s, envelope);
+                    }
+                }
+            }
+        }
+
+        for (String targetUid : List.of(
+                clientUid != null ? clientUid : "",
+                serviceGiverUid != null ? serviceGiverUid : ""
         )) {
             if (targetUid.isBlank()) continue;
             Set<WebSocketSession> sessions = userSessions.get(targetUid);

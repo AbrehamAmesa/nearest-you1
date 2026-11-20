@@ -85,6 +85,9 @@ public class UserAccount {
     @Column(name = "account_status", nullable = false)
     private String accountStatus = "ACTIVE";
 
+    @Column(name = "last_seen_at")
+    private Instant lastSeenAt = Instant.now();
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -163,6 +166,16 @@ public class UserAccount {
 
     public String getAccountStatus() { return accountStatus; }
     public void setAccountStatus(String accountStatus) { this.accountStatus = accountStatus; }
+
+    public Instant getLastSeenAt() { return lastSeenAt; }
+    public void setLastSeenAt(Instant lastSeenAt) { this.lastSeenAt = lastSeenAt; }
+
+    @JsonProperty("isActiveLastMinute")
+    public boolean isActiveLastMinute() {
+        if (lastSeenAt == null) return false;
+        long diffSeconds = java.time.Duration.between(lastSeenAt, Instant.now()).getSeconds();
+        return diffSeconds >= -5 && diffSeconds <= 60;
+    }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

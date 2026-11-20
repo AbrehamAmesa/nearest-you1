@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.util.*;
 
 @Service
@@ -27,6 +28,8 @@ public class EngagementService {
     private final BookingRepository bookingRepo;
     private final DeliveryRequestRepository deliveryRepo;
     private final UserAccountRepository userRepo;
+    private final ProviderRegistrationRepository providerRepo;
+    private final ServiceContractRepository contractRepo;
     private final LiveChatBroker liveChatBroker;
 
     public EngagementService(
@@ -40,6 +43,8 @@ public class EngagementService {
             BookingRepository bookingRepo,
             DeliveryRequestRepository deliveryRepo,
             UserAccountRepository userRepo,
+            ProviderRegistrationRepository providerRepo,
+            ServiceContractRepository contractRepo,
             LiveChatBroker liveChatBroker
     ) {
         this.favoriteRepo = favoriteRepo;
@@ -52,6 +57,8 @@ public class EngagementService {
         this.bookingRepo = bookingRepo;
         this.deliveryRepo = deliveryRepo;
         this.userRepo = userRepo;
+        this.providerRepo = providerRepo;
+        this.contractRepo = contractRepo;
         this.liveChatBroker = liveChatBroker;
     }
 
@@ -84,6 +91,7 @@ public class EngagementService {
         out.put("applications", appRepo.findByApplicantUidOrderByCreatedAtDesc(uid));
         out.put("favorites", favoriteRepo.findByUserUidOrderByCreatedAtDesc(uid));
         out.put("messages", scopedMessages);
+        out.put("contracts", contractRepo.findByClientUidOrServiceGiverUidOrderByUpdatedAtDesc(uid, uid));
         out.put("ownedBusinesses", owned);
         return out;
     }
@@ -168,7 +176,16 @@ public class EngagementService {
         }
 
         messages.sort(Comparator.comparing(Message::getCreatedAt));
-        return Map.of("threadKey", threadKey, "messages", messages);
+
+        Map<String, Object> partner = resolveThreadPartnerPresence(principal, threadKey, messages);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("threadKey", threadKey);
+        result.put("messages", messages);
+        result.put("otherPartyUid", partner.get("otherPartyUid"));
+        result.put("otherPartyName", partner.get("otherPartyName"));
+        result.put("otherPartyLastSeenAt", partner.get("otherPartyLastSeenAt"));
+        result.put("otherPartyActiveLastMinute", partner.get("otherPartyActiveLastMinute"));
+        return result;
     }
 
     @Transactional(readOnly = true)
@@ -199,7 +216,10 @@ public class EngagementService {
         for (Booking b : bookingRepo.findAll()) bookingMap.put(b.getId(), b);
 
         Map<String, UserAccount> userMap = new HashMap<>();
-        for (UserAccount u : userRepo.findAll()) userMap.put(u.getUid(), u);
+        for (UserAccount u : userRepo.findAll()) {
+            if (u.getUid() != null) userMap.put(u.getUid(), u);
+            if (u.getFirebaseUid() != null) userMap.putIfAbsent(u.getFirebaseUid(), u);
+        }
 
         Map<String, List<Message>> grouped = new LinkedHashMap<>();
         List<Message> allAsc = messageRepo.findAllByOrderByCreatedAtAsc();
@@ -267,6 +287,8 @@ public class EngagementService {
             item.put("bookingReference", booking != null ? booking.getBookingReference() : null);
             item.put("otherPartyUid", otherPartyUid);
             item.put("otherPartyName", otherPartyName);
+            item.put("otherPartyLastSeenAt", otherUser != null ? otherUser.getLastSeenAt() : null);
+            item.put("otherPartyActiveLastMinute", otherUser != null && otherUser.isActiveLastMinute());
             item.put("messageCount", msgs.size());
             item.put("lastMessage", last);
             threads.add(item);
@@ -540,5 +562,395 @@ public class EngagementService {
                 });
             }
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<ServiceContract> getContracts(UserPrincipal principal, String threadKey, Long listingId) {
+        if (threadKey != null && !threadKey.isBlank()) {
+            if (!canAccessThread(principal, threadKey)) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied for this conversation's contracts.");
+            }
+            List<ServiceContract> byThread = contractRepo.findByThreadKeyOrderByCreatedAtDesc(threadKey.trim());
+            if (listingId != null) {
+                return byThread.stream().filter(c -> listingId.equals(c.getListingId())).toList();
+            }
+            return byThread;
+        }
+        String uid = principal.uid();
+        List<ServiceContract> list = principal.isAdmin()
+                ? contractRepo.findAllByOrderByUpdatedAtDesc()
+                : contractRepo.findByClientUidOrServiceGiverUidOrderByUpdatedAtDesc(uid, uid);
+        if (listingId != null) {
+            return list.stream().filter(c -> listingId.equals(c.getListingId())).toList();
+        }
+        return list;
+    }
+
+    @Transactional
+    public ServiceContract createContractOffer(UserPrincipal principal, CreateContractOfferRequest req) {
+        String callerUid = principal.uid();
+        ServiceListing listing = req.listingId() != null
+                ? listingRepo.findById(req.listingId()).orElse(null)
+                : null;
+        Long resolvedBusinessId = req.businessId() != null
+                ? req.businessId()
+                : (listing != null ? listing.getBusinessId() : null);
+
+        String resolvedThreadKey = (req.threadKey() != null && !req.threadKey().isBlank())
+                ? req.threadKey().trim()
+                : null;
+        Long resolvedBookingId = req.bookingId();
+        String threadCustomerUid = null;
+
+        if (resolvedThreadKey != null) {
+            if (resolvedThreadKey.startsWith("booking:") && resolvedBookingId == null) {
+                resolvedBookingId = parsePositiveLong(resolvedThreadKey.substring("booking:".length()));
+            } else if (resolvedThreadKey.startsWith("contact:")) {
+                String[] parts = resolvedThreadKey.split(":", 4);
+                if (parts.length >= 4) {
+                    if (resolvedBusinessId == null) resolvedBusinessId = parsePositiveLong(parts[1]);
+                    if (listing == null) {
+                        Long lid = parsePositiveLong(parts[2]);
+                        if (lid != null && lid > 0) listing = listingRepo.findById(lid).orElse(null);
+                    }
+                    threadCustomerUid = parts[3];
+                }
+            }
+        }
+
+        Booking booking = resolvedBookingId != null
+                ? bookingRepo.findById(resolvedBookingId).orElse(null)
+                : null;
+        if (booking != null) {
+            if (resolvedBusinessId == null) resolvedBusinessId = booking.getBusinessId();
+            if (listing == null && booking.getListingId() != null) {
+                listing = listingRepo.findById(booking.getListingId()).orElse(null);
+            }
+            threadCustomerUid = booking.getCustomerUid();
+        }
+
+        if (resolvedBusinessId == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Target service provider or listing is required for a contract offer.");
+        }
+
+        Business biz = businessRepo.findById(resolvedBusinessId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Service provider not found."));
+        String serviceGiverUid = biz.getOwnerUid();
+        boolean callerIsServiceGiver = callerUid.equals(serviceGiverUid);
+
+        String clientUid;
+        if (callerIsServiceGiver) {
+            clientUid = (req.recipientUid() != null && !req.recipientUid().isBlank())
+                    ? req.recipientUid().trim()
+                    : threadCustomerUid;
+            if (clientUid == null || clientUid.isBlank()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Client recipient is required when sending a contract offer.");
+            }
+        } else {
+            clientUid = callerUid;
+        }
+
+        if (clientUid.equals(serviceGiverUid)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot create a contract offer with yourself.");
+        }
+
+        String normalizedType = req.contractType().trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("ONE_TIME_CONTRACT", "FULL_TIME", "PER_HOUR", "PER_DAY", "PER_MONTH").contains(normalizedType)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Unsupported contract type.");
+        }
+
+        BigDecimal agreedAmount = req.agreedAmount();
+        if ("PER_HOUR".equals(normalizedType) && req.hourlyRate() != null && req.estimatedHours() != null && req.estimatedHours() > 0) {
+            BigDecimal computed = req.hourlyRate().multiply(BigDecimal.valueOf(req.estimatedHours()));
+            if (agreedAmount == null || agreedAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                agreedAmount = computed;
+            }
+        }
+        if (agreedAmount == null || agreedAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Contract amount must be greater than 0 ETB.");
+        }
+
+        String paymentSchedule = (req.paymentSchedule() != null && !req.paymentSchedule().isBlank())
+                ? req.paymentSchedule().trim().toUpperCase(Locale.ROOT)
+                : ("FULL_TIME".equals(normalizedType) || "PER_MONTH".equals(normalizedType) ? "MONTHLY" : "ON_COMPLETION");
+
+        if (resolvedThreadKey == null) {
+            long listingSegment = listing != null ? listing.getId() : 0L;
+            resolvedThreadKey = "contact:" + biz.getId() + ":" + listingSegment + ":" + clientUid;
+        }
+
+        String serviceGiverName = resolveProviderDisplayName(serviceGiverUid, biz);
+        String clientName = resolveUserDisplayName(clientUid, booking != null ? booking.getCustomerName() : "Client");
+        String contractRef = "NY-CTR-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+
+        ServiceContract contract = new ServiceContract();
+        contract.setContractReference(contractRef);
+        contract.setThreadKey(resolvedThreadKey);
+        contract.setBusinessId(biz.getId());
+        contract.setListingId(listing != null ? listing.getId() : null);
+        contract.setBookingId(booking != null ? booking.getId() : null);
+        contract.setServiceGiverUid(serviceGiverUid);
+        contract.setServiceGiverName(serviceGiverName);
+        contract.setClientUid(clientUid);
+        contract.setClientName(clientName);
+        contract.setOfferedByUid(callerUid);
+        contract.setOfferedByRole(callerIsServiceGiver ? "PROVIDER" : "CUSTOMER");
+        contract.setContractType(normalizedType);
+        contract.setTitle(req.title().trim());
+        contract.setScopeSummary(req.scopeSummary().trim());
+        contract.setDeliverables(req.deliverables() != null && !req.deliverables().isBlank() ? req.deliverables().trim() : null);
+        contract.setPaymentSchedule(paymentSchedule);
+        contract.setAgreedAmount(agreedAmount.setScale(2, RoundingMode.HALF_UP));
+        contract.setHourlyRate(req.hourlyRate() != null ? req.hourlyRate().setScale(2, RoundingMode.HALF_UP) : null);
+        contract.setEstimatedHours(req.estimatedHours());
+        contract.setStartDate(req.startDate() != null && !req.startDate().isBlank() ? req.startDate().trim() : null);
+        contract.setEndDate(req.endDate() != null && !req.endDate().isBlank() ? req.endDate().trim() : null);
+        contract.setStatus("OFFERED");
+
+        ServiceContract saved = contractRepo.save(contract);
+
+        postContractThreadMessage(
+                principal,
+                saved,
+                "Contract Offer (" + contractRef + "): " + saved.getTitle() + " · " + saved.getContractType().replace("_", " ")
+                        + " · " + saved.getAgreedAmount() + " ETB (" + saved.getPaymentSchedule().replace("_", " ") + ")"
+        );
+        liveChatBroker.broadcastContractEvent(saved, saved.getClientUid(), saved.getServiceGiverUid());
+        return saved;
+    }
+
+    @Transactional
+    public ServiceContract respondToContract(UserPrincipal principal, Long contractId, RespondContractRequest req) {
+        ServiceContract contract = contractRepo.findById(contractId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Contract offer not found."));
+
+        String uid = principal.uid();
+        boolean isParticipant = uid.equals(contract.getClientUid()) || uid.equals(contract.getServiceGiverUid());
+        if (!principal.isAdmin() && !isParticipant) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied for this service contract.");
+        }
+
+        String action = req.action().trim().toUpperCase(Locale.ROOT);
+        String currentStatus = contract.getStatus();
+        String timelineBody;
+
+        switch (action) {
+            case "ACCEPT" -> {
+                if (!Set.of("OFFERED", "COUNTERED").contains(currentStatus)) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Only pending or countered offers can be accepted.");
+                }
+                if (!principal.isAdmin() && uid.equals(contract.getOfferedByUid())) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot accept your own contract offer. Wait for the other party to accept.");
+                }
+                contract.setStatus("ACCEPTED");
+                contract.setAcceptedAt(Instant.now());
+                timelineBody = "Contract Accepted (" + contract.getContractReference() + "): " + contract.getTitle()
+                        + " locked at " + contract.getAgreedAmount() + " ETB.";
+            }
+            case "COUNTER" -> {
+                if (!Set.of("OFFERED", "COUNTERED").contains(currentStatus)) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Only active offers can be countered.");
+                }
+                if (!principal.isAdmin() && uid.equals(contract.getOfferedByUid())) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Wait for the other party to respond before sending another counter-offer.");
+                }
+                if (req.counterAmount() == null || req.counterAmount().compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Counter-offer amount must be greater than 0 ETB.");
+                }
+                contract.setAgreedAmount(req.counterAmount().setScale(2, RoundingMode.HALF_UP));
+                if (req.nextPaymentSchedule() != null && !req.nextPaymentSchedule().isBlank()) {
+                    contract.setPaymentSchedule(req.nextPaymentSchedule().trim().toUpperCase(Locale.ROOT));
+                }
+                if (req.deliverables() != null && !req.deliverables().isBlank()) {
+                    contract.setDeliverables(req.deliverables().trim());
+                }
+                if (req.counterNotes() != null && !req.counterNotes().isBlank()) {
+                    contract.setCounterNotes(req.counterNotes().trim());
+                }
+                contract.setOfferedByUid(uid);
+                contract.setOfferedByRole(uid.equals(contract.getServiceGiverUid()) ? "PROVIDER" : "CUSTOMER");
+                contract.setStatus("COUNTERED");
+                timelineBody = "Contract Counter-Offer (" + contract.getContractReference() + "): Proposed "
+                        + contract.getAgreedAmount() + " ETB"
+                        + (contract.getCounterNotes() != null ? " — " + contract.getCounterNotes() : "");
+            }
+            case "DECLINE" -> {
+                if (!Set.of("OFFERED", "COUNTERED").contains(currentStatus)) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Only pending or countered offers can be declined.");
+                }
+                if (!principal.isAdmin() && uid.equals(contract.getOfferedByUid())) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Use Cancel to withdraw your own offer.");
+                }
+                contract.setStatus("DECLINED");
+                if (req.counterNotes() != null && !req.counterNotes().isBlank()) {
+                    contract.setCounterNotes(req.counterNotes().trim());
+                }
+                timelineBody = "Contract Declined (" + contract.getContractReference() + ")"
+                        + (contract.getCounterNotes() != null ? ": " + contract.getCounterNotes() : ".");
+            }
+            case "CANCEL" -> {
+                if (!Set.of("OFFERED", "COUNTERED").contains(currentStatus)) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Accepted or finished contracts cannot be cancelled here.");
+                }
+                if (!principal.isAdmin() && !uid.equals(contract.getOfferedByUid())) {
+                    throw new ApiException(HttpStatus.FORBIDDEN, "Only the sender can withdraw this offer.");
+                }
+                contract.setStatus("CANCELLED");
+                timelineBody = "Contract Offer Withdrawn (" + contract.getContractReference() + ").";
+            }
+            case "START" -> {
+                if (!"ACCEPTED".equals(currentStatus)) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Contract must be accepted before starting work.");
+                }
+                contract.setStatus("ACTIVE");
+                timelineBody = "Contract Work Started (" + contract.getContractReference() + ").";
+            }
+            case "COMPLETE" -> {
+                if (!Set.of("ACCEPTED", "ACTIVE").contains(currentStatus)) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Only accepted or active contracts can be marked completed.");
+                }
+                contract.setStatus("COMPLETED");
+                contract.setCompletedAt(Instant.now());
+                timelineBody = "Contract Completed (" + contract.getContractReference() + "): " + contract.getTitle() + ".";
+            }
+            default -> throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid contract action: " + action);
+        }
+
+        ServiceContract saved = contractRepo.save(contract);
+        postContractThreadMessage(principal, saved, timelineBody);
+        liveChatBroker.broadcastContractEvent(saved, saved.getClientUid(), saved.getServiceGiverUid());
+        return saved;
+    }
+
+    private void postContractThreadMessage(UserPrincipal principal, ServiceContract contract, String body) {
+        String senderUid = principal.uid();
+        String recipientUid = senderUid.equals(contract.getClientUid())
+                ? contract.getServiceGiverUid()
+                : contract.getClientUid();
+        String senderRole = principal.isAdmin()
+                ? "ADMIN"
+                : (senderUid.equals(contract.getServiceGiverUid()) ? "PROVIDER" : "CUSTOMER");
+
+        Message msg = new Message();
+        msg.setSenderUid(senderUid);
+        msg.setSenderName(principal.account().getFullName());
+        msg.setSenderRole(senderRole);
+        msg.setRecipientUid(recipientUid);
+        msg.setBusinessId(contract.getBusinessId());
+        msg.setListingId(contract.getListingId());
+        msg.setBookingId(contract.getBookingId());
+        msg.setThreadKey(contract.getThreadKey());
+        msg.setBody(body);
+
+        Message savedMsg = messageRepo.save(msg);
+        liveChatBroker.broadcastMessage(savedMsg, senderUid, recipientUid, contract.getServiceGiverUid());
+    }
+
+    private Map<String, Object> resolveThreadPartnerPresence(
+            UserPrincipal principal,
+            String threadKey,
+            List<Message> messages
+    ) {
+        String viewerUid = principal.uid();
+        String otherPartyUid = null;
+        String fallbackName = null;
+
+        if (threadKey.startsWith("order:")) {
+            Long orderId = parsePositiveLong(threadKey.substring("order:".length()));
+            if (orderId != null) {
+                Optional<CustomerOrder> orderOpt = orderRepo.findById(orderId);
+                if (orderOpt.isPresent()) {
+                    CustomerOrder order = orderOpt.get();
+                    Business biz = businessRepo.findById(order.getBusinessId()).orElse(null);
+                    if (biz != null && viewerUid.equals(biz.getOwnerUid())) {
+                        otherPartyUid = order.getCustomerUid();
+                        fallbackName = order.getCustomerName();
+                    } else if (biz != null) {
+                        otherPartyUid = biz.getOwnerUid();
+                        fallbackName = biz.getBusinessName();
+                    }
+                }
+            }
+        } else if (threadKey.startsWith("booking:")) {
+            Long bookingId = parsePositiveLong(threadKey.substring("booking:".length()));
+            if (bookingId != null) {
+                Optional<Booking> bookingOpt = bookingRepo.findById(bookingId);
+                if (bookingOpt.isPresent()) {
+                    Booking booking = bookingOpt.get();
+                    Business biz = businessRepo.findById(booking.getBusinessId()).orElse(null);
+                    if (biz != null && viewerUid.equals(biz.getOwnerUid())) {
+                        otherPartyUid = booking.getCustomerUid();
+                        fallbackName = booking.getCustomerName();
+                    } else if (biz != null) {
+                        otherPartyUid = biz.getOwnerUid();
+                        fallbackName = biz.getBusinessName();
+                    }
+                }
+            }
+        } else if (threadKey.startsWith("contact:")) {
+            String[] parts = threadKey.split(":", 4);
+            if (parts.length >= 4) {
+                Long businessId = parsePositiveLong(parts[1]);
+                String customerUid = parts[3];
+                Business biz = businessId != null ? businessRepo.findById(businessId).orElse(null) : null;
+                if (biz != null) {
+                    if (viewerUid.equals(biz.getOwnerUid())) {
+                        otherPartyUid = customerUid;
+                    } else {
+                        otherPartyUid = biz.getOwnerUid();
+                        fallbackName = biz.getBusinessName();
+                    }
+                }
+            }
+        }
+
+        if (otherPartyUid == null && messages != null) {
+            for (Message m : messages) {
+                if (!viewerUid.equals(m.getSenderUid())) {
+                    otherPartyUid = m.getSenderUid();
+                    fallbackName = m.getSenderName();
+                    break;
+                } else if (m.getRecipientUid() != null && !viewerUid.equals(m.getRecipientUid())) {
+                    otherPartyUid = m.getRecipientUid();
+                    break;
+                }
+            }
+        }
+
+        UserAccount otherUser = null;
+        if (otherPartyUid != null && !otherPartyUid.isBlank()) {
+            otherUser = userRepo.findByUid(otherPartyUid)
+                    .orElseGet(() -> userRepo.findByFirebaseUid(otherPartyUid).orElse(null));
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("otherPartyUid", otherPartyUid);
+        out.put("otherPartyName", otherUser != null ? otherUser.getFullName() : fallbackName);
+        out.put("otherPartyLastSeenAt", otherUser != null ? otherUser.getLastSeenAt() : null);
+        out.put("otherPartyActiveLastMinute", otherUser != null && otherUser.isActiveLastMinute());
+        return out;
+    }
+
+    private String resolveProviderDisplayName(String uid, Business biz) {
+        UserAccount acc = userRepo.findByUid(uid)
+                .orElseGet(() -> userRepo.findByFirebaseUid(uid).orElse(null));
+        if (acc != null && acc.getFullName() != null && !acc.getFullName().isBlank()
+                && !"Nearest You User".equalsIgnoreCase(acc.getFullName().trim())) {
+            return acc.getFullName().trim();
+        }
+        ProviderRegistration reg = providerRepo.findFirstByUserUidOrderByUpdatedAtDesc(uid).orElse(null);
+        if (reg != null && reg.getFullName() != null && !reg.getFullName().isBlank()) {
+            return reg.getFullName().trim();
+        }
+        return biz != null ? biz.getBusinessName() : "Service Giver";
+    }
+
+    private String resolveUserDisplayName(String uid, String fallback) {
+        UserAccount acc = userRepo.findByUid(uid)
+                .orElseGet(() -> userRepo.findByFirebaseUid(uid).orElse(null));
+        if (acc != null && acc.getFullName() != null && !acc.getFullName().isBlank()) {
+            return acc.getFullName().trim();
+        }
+        return fallback;
     }
 }

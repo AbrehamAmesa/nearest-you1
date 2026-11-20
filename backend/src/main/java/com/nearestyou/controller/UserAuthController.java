@@ -14,6 +14,7 @@ import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.util.Map;
 
 @RestController
@@ -78,6 +79,17 @@ public class UserAuthController {
     ) {
         UserAccount updated = userSyncService.updateProfileWhitelist(principal.uid(), req);
         return Map.of("user", updated);
+    }
+
+    @PostMapping("/users/heartbeat")
+    public Map<String, Object> heartbeat(@AuthenticationPrincipal UserPrincipal principal) {
+        userSyncService.touchUserPresence(principal.uid(), true);
+        Instant now = Instant.now();
+        return Map.of(
+                "uid", principal.uid(),
+                "lastSeenAt", now,
+                "isActiveLastMinute", true
+        );
     }
 
     @GetMapping("/me/workspace")

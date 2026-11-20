@@ -6,6 +6,7 @@ import com.nearestyou.dto.NearestYouDtos.SendMessageRequest;
 import com.nearestyou.exception.ApiException;
 import com.nearestyou.security.UserPrincipal;
 import com.nearestyou.service.EngagementService;
+import com.nearestyou.service.UserSyncService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -14,6 +15,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.time.Instant;
 import java.util.Map;
 
 @Component
@@ -23,14 +25,17 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
 
     private final LiveChatBroker liveChatBroker;
     private final EngagementService engagementService;
+    private final UserSyncService userSyncService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public LiveChatWebSocketHandler(
             LiveChatBroker liveChatBroker,
-            EngagementService engagementService
+            EngagementService engagementService,
+            UserSyncService userSyncService
     ) {
         this.liveChatBroker = liveChatBroker;
         this.engagementService = engagementService;
+        this.userSyncService = userSyncService;
     }
 
     @Override
@@ -44,6 +49,7 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         liveChatBroker.registerUserSession(principal.uid(), session);
+        userSyncService.touchUserPresence(principal.uid(), true);
         liveChatBroker.sendToSession(session, Map.of(
                 "type", "connected",
                 "uid", principal.uid()
@@ -64,8 +70,15 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
             if (type == null || type.isBlank()) return;
 
             switch (type) {
-                case "ping" -> liveChatBroker.sendToSession(session, Map.of("type", "pong"));
+                case "ping" -> {
+                    userSyncService.touchUserPresence(principal.uid(), false);
+                    liveChatBroker.sendToSession(session, Map.of(
+                            "type", "pong",
+                            "lastSeenAt", Instant.now().toString()
+                    ));
+                }
                 case "join" -> {
+                    userSyncService.touchUserPresence(principal.uid(), false);
                     String threadKey = asString(payload.get("threadKey"));
                     if (threadKey != null && engagementService.canAccessThread(principal, threadKey)) {
                         liveChatBroker.joinRoom(threadKey, session);
@@ -115,6 +128,7 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
                             body
                     );
                     engagementService.sendMessage(principal, req);
+                    userSyncService.touchUserPresence(principal.uid(), true);
                 }
                 default -> {
                     // Ignore unknown frame types gracefully
@@ -138,12 +152,14 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String uid = (String) session.getAttributes().get("uid");
         liveChatBroker.unregisterSession(uid, session);
+        userSyncService.touchUserPresence(uid, true);
     }
 
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         String uid = (String) session.getAttributes().get("uid");
         liveChatBroker.unregisterSession(uid, session);
+        userSyncService.touchUserPresence(uid, true);
     }
 
     private String asString(Object value) {

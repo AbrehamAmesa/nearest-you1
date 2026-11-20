@@ -22,9 +22,11 @@ import type {
 } from '../types/nearestyou.ts';
 import { formatEtb } from '../utils/geo.ts';
 import { TRANSLATIONS, type AppLanguage } from '../utils/i18n.ts';
+import { formatEtaClock, formatLastSeenStatus } from '../utils/presence.ts';
 import { businessApi, engagementApi, jobSeekerApi } from '../api/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useLiveChatInboxListener } from '../hooks/useLiveChat.ts';
+import { ContractOfferSection } from './ContractOfferSection.tsx';
 import { LiveChatDrawer, type ActiveChatTarget } from './LiveChatDrawer.tsx';
 import { LiveChatPanel } from './LiveChatPanel.tsx';
 import { LiveDriverTrackerMap } from './ServiceMap.tsx';
@@ -63,6 +65,8 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
   const [chatDrawerTarget, setChatDrawerTarget] = useState<ActiveChatTarget | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [contractRefreshSignal, setContractRefreshSignal] = useState(0);
 
   // Verified review modal state
   const [reviewTarget, setReviewTarget] = useState<{
@@ -84,6 +88,11 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   const [trackingCodeOpen, setTrackingCodeOpen] = useState<string | null>(null);
   const [liveTrackData, setLiveTrackData] = useState<Partial<DeliveryRecord> | null>(null);
 
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 15000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const loadThreadsOnly = async () => {
     if (!firebaseUser) return;
     try {
@@ -96,9 +105,16 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
     }
   };
 
-  useLiveChatInboxListener(Boolean(firebaseUser), () => {
-    loadThreadsOnly();
-  });
+  useLiveChatInboxListener(
+    Boolean(firebaseUser),
+    () => {
+      loadThreadsOnly();
+    },
+    () => {
+      setContractRefreshSignal((n) => n + 1);
+      loadThreadsOnly();
+    }
+  );
 
   const loadWorkspace = async () => {
     if (!firebaseUser) return;
@@ -196,6 +212,20 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
     if (res.ok) {
       onNotify('Revised quotation approved and booking confirmed.');
       loadWorkspace();
+    }
+  };
+
+  const handleCancelOrder = async (orderId: number) => {
+    const res = await authFetch(`/api/v1/orders/${orderId}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ orderStatus: 'CANCELLED' }),
+    });
+    if (res.ok) {
+      onNotify('Order cancelled.');
+      loadWorkspace();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      onNotify(err.error || 'Could not cancel order.');
     }
   };
 
@@ -329,6 +359,10 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
               ) : (
                 orders.map((ord) => {
                   const biz = bizById[ord.businessId];
+                  const snap = ord.returnPolicySnapshot;
+                  const canCancel = ['REQUESTED', 'PENDING', 'CONFIRMED', 'ACCEPTED'].includes(
+                    ord.orderStatus
+                  );
                   return (
                     <div
                       key={ord.id}
@@ -362,7 +396,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                             <span className="font-mono tabular-nums">{formatEtb(it.lineTotal)}</span>
                           </div>
                         ))}
-                        <div className="flex justify-between pt-2 text-[#172B3A]/60">
+                        <div className="flex flex-wrap justify-between gap-2 pt-2 text-[#172B3A]/60">
                           <span>
                             Payment: {ord.paymentMethod} · {ord.fulfillmentType} ({ord.deliveryAddress})
                           </span>
@@ -372,7 +406,66 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                         </div>
                       </div>
 
+                      {/* Order Acceptance & Approximate Ready / Delivery Time */}
+                      <div className="mt-3 space-y-1 rounded-lg border border-[#172B3A]/10 bg-[#F4F6F5]/65 p-3 text-xs text-[#172B3A]/80">
+                        <p>
+                          <strong className="text-[#172B3A]">Acceptance &amp; Time:</strong>{' '}
+                          {ord.orderStatus === 'REQUESTED' || ord.orderStatus === 'PENDING'
+                            ? 'Order Request sent — waiting for seller acceptance & confirmed ready/delivery time.'
+                            : ord.orderStatus === 'REJECTED'
+                              ? `Order Rejected${ord.rejectionReason ? `: ${ord.rejectionReason}` : '.'}`
+                              : ord.immediateAcceptance
+                                ? 'Immediate Acceptance'
+                                : 'Accepted by seller'}
+                          {(ord.estimatedReadyAt || ord.estimatedReadyMinutes) &&
+                            ord.orderStatus !== 'REJECTED' &&
+                            ord.orderStatus !== 'CANCELLED' && (
+                              <span className="ml-1 font-mono tabular-nums text-[#176B52]">
+                                · Ready: {formatEtaClock(ord.estimatedReadyAt, ord.estimatedReadyMinutes)}
+                                {ord.fulfillmentType === 'DELIVERY' &&
+                                  ` · Delivery: ${formatEtaClock(
+                                    ord.estimatedDeliveryAt,
+                                    ord.estimatedDeliveryMinutes
+                                  )}`}
+                              </span>
+                            )}
+                        </p>
+                        {snap && (
+                          <p>
+                            <strong className="text-[#172B3A]">If Unsatisfied (Return Loss):</strong>{' '}
+                            {snap.returnable ? (
+                              <span className="font-mono tabular-nums">
+                                Returnable within {snap.returnWindowDays ?? 3}d · Item deduction:{' '}
+                                {formatEtb(snap.estimatedItemLossOnReturnEtb ?? 0)} ·{' '}
+                                {ord.fulfillmentType === 'DELIVERY'
+                                  ? snap.deliveryFeeNonRefundableOnReturn
+                                    ? `Loses delivery fee (${formatEtb(snap.estimatedDeliveryLossOnReturnEtb ?? 0)})`
+                                    : 'Delivery fee refunded'
+                                  : 'Store pickup'}
+                                {' · '}
+                                Total buyer loss:{' '}
+                                <strong>{formatEtb(snap.estimatedTotalLossOnReturnEtb ?? 0)}</strong>
+                              </span>
+                            ) : (
+                              <span className="font-semibold text-red-700">
+                                Non-Returnable (Final Sale · Loss:{' '}
+                                {formatEtb(snap.estimatedTotalLossOnReturnEtb ?? ord.totalAmount)})
+                              </span>
+                            )}
+                          </p>
+                        )}
+                      </div>
+
                       <div className="mt-4 flex flex-wrap justify-end gap-2">
+                        {canCancel && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelOrder(ord.id)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                          >
+                            Cancel Order
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() =>
@@ -414,6 +507,14 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
 
           {tab === 'BOOKINGS' && (
             <div className="space-y-4">
+              <ContractOfferSection
+                refreshSignal={contractRefreshSignal}
+                onContractChanged={() => {
+                  setContractRefreshSignal((n) => n + 1);
+                  loadWorkspace();
+                }}
+              />
+
               {bookings.length === 0 ? (
                 <div className="rounded-xl border border-[#172B3A]/10 bg-white p-12 text-center text-sm text-[#172B3A]/65">
                   No service bookings or rental reservations yet.
@@ -471,12 +572,13 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                               recipientUid: biz?.ownerUid,
                               title: `${b.bookingReference} · ${t.liveChat}`,
                               subtitle: `${listing?.title || b.bookingType} · ${biz?.businessName || 'Provider'}`,
+                              enableContracts: true,
                             })
                           }
                           className="inline-flex items-center gap-1.5 rounded-lg bg-[#176B52] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#125641]"
                         >
                           <MessageSquare className="h-3.5 w-3.5" />
-                          {t.liveChat}
+                          {t.liveChat} &amp; Contracts
                         </button>
                         {b.bookingStatus === 'QUOTED' && !b.quoteApproved && (
                           <button
@@ -691,6 +793,11 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                   <div className="max-h-[420px] space-y-2 overflow-y-auto overflow-x-hidden pr-1">
                     {threads.map((th) => {
                       const active = selectedThreadKey === th.threadKey;
+                      const presence = formatLastSeenStatus(
+                        th.otherPartyLastSeenAt,
+                        th.otherPartyActiveLastMinute,
+                        nowTick
+                      );
                       return (
                         <button
                           key={th.threadKey}
@@ -714,6 +821,17 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                                   : 'SERVICE CHAT'}
                             </span>
                           </div>
+                          <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[#172B3A]/65">
+                            <span
+                              aria-hidden="true"
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                presence.isActiveNow ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                              }`}
+                            />
+                            <span className={presence.isActiveNow ? 'font-semibold text-[#176B52]' : ''}>
+                              {presence.label}
+                            </span>
+                          </p>
                           {th.listingTitle && (
                             <p className="mt-0.5 truncate text-[11px] font-medium text-[#172B3A]/75">
                               {th.listingTitle}
@@ -729,7 +847,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                 )}
               </div>
 
-              <div className="min-w-0 lg:col-span-7">
+              <div className="min-w-0 space-y-4 lg:col-span-7">
                 {(() => {
                   const selected =
                     threads.find((th) => th.threadKey === selectedThreadKey) || threads[0];
@@ -741,22 +859,43 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                     );
                   }
                   return (
-                    <LiveChatPanel
-                      threadKey={selected.threadKey}
-                      businessId={selected.businessId}
-                      listingId={selected.listingId}
-                      orderId={selected.orderId}
-                      bookingId={selected.bookingId}
-                      recipientUid={selected.otherPartyUid}
-                      title={selected.otherPartyName || selected.businessName}
-                      subtitle={
-                        selected.orderNumber
-                          ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
-                          : selected.listingTitle || selected.businessName
-                      }
-                      placeholder={TRANSLATIONS[language].discover.writeReply}
-                      onMessageSentOrReceived={() => loadThreadsOnly()}
-                    />
+                    <>
+                      <LiveChatPanel
+                        threadKey={selected.threadKey}
+                        businessId={selected.businessId}
+                        listingId={selected.listingId}
+                        orderId={selected.orderId}
+                        bookingId={selected.bookingId}
+                        recipientUid={selected.otherPartyUid}
+                        title={selected.otherPartyName || selected.businessName}
+                        subtitle={
+                          selected.orderNumber
+                            ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
+                            : selected.listingTitle || selected.businessName
+                        }
+                        initialLastSeenAt={selected.otherPartyLastSeenAt}
+                        initialActiveLastMinute={selected.otherPartyActiveLastMinute}
+                        placeholder={TRANSLATIONS[language].discover.writeReply}
+                        onMessageSentOrReceived={() => loadThreadsOnly()}
+                        onContractUpdated={() => setContractRefreshSignal((n) => n + 1)}
+                      />
+                      {!selected.orderId && (
+                        <ContractOfferSection
+                          threadKey={selected.threadKey}
+                          businessId={selected.businessId}
+                          listingId={selected.listingId}
+                          bookingId={selected.bookingId}
+                          recipientUid={selected.otherPartyUid}
+                          defaultTitle={selected.listingTitle || selected.businessName}
+                          compact
+                          refreshSignal={contractRefreshSignal}
+                          onContractChanged={() => {
+                            setContractRefreshSignal((n) => n + 1);
+                            loadThreadsOnly();
+                          }}
+                        />
+                      )}
+                    </>
                   );
                 })()}
               </div>

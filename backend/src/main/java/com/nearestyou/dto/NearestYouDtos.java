@@ -152,7 +152,12 @@ public final class NearestYouDtos {
 
     public record CreateOrdersRequest(@NotEmpty List<OrderGroupInput> groups, @NotBlank String paymentMethod) {}
 
-    public record UpdateOrderStatusRequest(@NotBlank String orderStatus) {}
+    public record UpdateOrderStatusRequest(
+        @NotBlank String orderStatus,
+        Integer estimatedReadyMinutes,
+        Integer estimatedDeliveryMinutes,
+        String rejectionReason
+    ) {}
 
     public record CreateBookingRequest(
         @NotNull Long listingId,
@@ -334,5 +339,31 @@ public final class NearestYouDtos {
         String cvUrl,
         String cvFileName,
         String introVideoUrl
+    ) {}
+
+    public record CreateContractOfferRequest(
+        Long listingId,
+        Long businessId,
+        Long bookingId,
+        String threadKey,
+        String recipientUid,
+        @NotBlank String contractType,
+        @NotBlank String title,
+        @NotBlank String scopeSummary,
+        String deliverables,
+        String paymentSchedule,
+        @NotNull BigDecimal agreedAmount,
+        BigDecimal hourlyRate,
+        Integer estimatedHours,
+        String startDate,
+        String endDate
+    ) {}
+
+    public record RespondContractRequest(
+        @NotBlank String action,
+        BigDecimal counterAmount,
+        String counterNotes,
+        String nextPaymentSchedule,
+        String deliverables
     ) {}
 }

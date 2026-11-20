@@ -16,7 +16,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class UserSyncService {
@@ -25,6 +28,7 @@ public class UserSyncService {
     private final BusinessRepository businessRepo;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final Set<String> superAdminEmails = new HashSet<>();
+    private final Map<String, Instant> lastPresenceTouchMap = new ConcurrentHashMap<>();
 
     public UserSyncService(
             UserAccountRepository userRepo,
@@ -86,6 +90,7 @@ public class UserSyncService {
             }
             existing.setAdmin(nextIsAdmin);
             existing.setRoles(new ArrayList<>(mergedRoles));
+            existing.setLastSeenAt(Instant.now());
             return userRepo.save(existing);
         }
 
@@ -100,6 +105,7 @@ public class UserSyncService {
         } else {
             created.setRoles(new ArrayList<>(List.of("CUSTOMER")));
         }
+        created.setLastSeenAt(Instant.now());
         return userRepo.save(created);
     }
 
@@ -168,10 +174,9 @@ public class UserSyncService {
             mergedRoles.add("SUPER_ADMIN");
             user.setAdmin(true);
             user.setRoles(new ArrayList<>(mergedRoles));
-            return userRepo.save(user);
         }
-
-        return user;
+        user.setLastSeenAt(Instant.now());
+        return userRepo.save(user);
     }
 
     @Transactional
@@ -268,6 +273,23 @@ public class UserSyncService {
             }
             roles.add("CUSTOMER");
             user.setRoles(new ArrayList<>(roles));
+            userRepo.save(user);
+        });
+    }
+
+    @Transactional
+    public void touchUserPresence(String uid, boolean force) {
+        if (uid == null || uid.isBlank()) return;
+        Instant now = Instant.now();
+        if (!force) {
+            Instant previous = lastPresenceTouchMap.get(uid);
+            if (previous != null && Duration.between(previous, now).getSeconds() < 12) {
+                return;
+            }
+        }
+        lastPresenceTouchMap.put(uid, now);
+        userRepo.findByUid(uid).ifPresent(user -> {
+            user.setLastSeenAt(now);
             userRepo.save(user);
         });
     }

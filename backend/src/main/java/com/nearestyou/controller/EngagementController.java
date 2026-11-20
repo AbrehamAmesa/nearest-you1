@@ -4,6 +4,7 @@ import com.nearestyou.dto.NearestYouDtos.*;
 import com.nearestyou.entity.JobApplication;
 import com.nearestyou.entity.Message;
 import com.nearestyou.entity.Review;
+import com.nearestyou.entity.ServiceContract;
 import com.nearestyou.security.UserPrincipal;
 import com.nearestyou.service.EngagementService;
 import jakarta.validation.Valid;
@@ -82,5 +83,32 @@ public class EngagementController {
             @Valid @RequestBody CreateReviewRequest req
     ) {
         return engagementService.submitVerifiedReview(principal, req);
+    }
+
+    @GetMapping("/contracts")
+    public List<ServiceContract> getContracts(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(required = false) String threadKey,
+            @RequestParam(required = false) Long listingId
+    ) {
+        return engagementService.getContracts(principal, threadKey, listingId);
+    }
+
+    @PostMapping("/contracts")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ServiceContract createContractOffer(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody CreateContractOfferRequest req
+    ) {
+        return engagementService.createContractOffer(principal, req);
+    }
+
+    @PostMapping("/contracts/{id}/respond")
+    public ServiceContract respondToContract(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @Valid @RequestBody RespondContractRequest req
+    ) {
+        return engagementService.respondToContract(principal, id, req);
     }
 }

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
@@ -75,12 +76,77 @@ public class OrderAndBookingService {
             BigDecimal totalDiscount = BigDecimal.ZERO;
             List<Map<String, Object>> snapshot = new ArrayList<>();
 
+            boolean isFoodOrder = "FOOD".equalsIgnoreCase(group.orderType());
+            boolean groupDeliverySupported = true;
+            boolean groupImmediateAcceptance = !isFoodOrder;
+            Integer maxReadyMinutes = null;
+            Integer maxDeliveryMinutes = null;
+            boolean allReturnable = true;
+            int minReturnWindowDays = 7;
+            double maxReturnLossPercent = 0.0;
+            double totalFixedLossEtb = 0.0;
+            boolean anyDeliveryFeeNonRefundable = false;
+            List<String> policyNotes = new ArrayList<>();
+
             for (OrderItemInput item : group.items()) {
                 ServiceListing listing = listingRepo.findById(item.listingId())
                         .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "BR-011 Violation: Listing is unavailable."));
                 if (!"ACTIVE".equalsIgnoreCase(listing.getStatus()) || !"AVAILABLE".equalsIgnoreCase(listing.getAvailabilityStatus())) {
                     throw new ApiException(HttpStatus.BAD_REQUEST, "BR-011 Violation: \"" + listing.getTitle() + "\" is currently unavailable.");
                 }
+                if ("FOOD".equalsIgnoreCase(listing.getListingType())) {
+                    isFoodOrder = true;
+                    groupImmediateAcceptance = false;
+                }
+
+                Map<String, Object> meta = listing.getMetadata() != null ? listing.getMetadata() : Map.of();
+                boolean itemDeliveryAvailable = !(meta.get("deliveryAvailable") instanceof Boolean b) || b;
+                if (!itemDeliveryAvailable) {
+                    groupDeliverySupported = false;
+                    if ("DELIVERY".equalsIgnoreCase(group.fulfillmentType())) {
+                        throw new ApiException(
+                                HttpStatus.BAD_REQUEST,
+                                "\"" + listing.getTitle() + "\" is advertised Without Delivery (Store Pickup Only)."
+                        );
+                    }
+                }
+
+                if (!isFoodOrder && meta.get("immediateAcceptance") instanceof Boolean imm && !imm) {
+                    groupImmediateAcceptance = false;
+                }
+
+                int readyMins = toInt(
+                        meta.get("estimatedReadyMinutes") != null ? meta.get("estimatedReadyMinutes") : meta.get("prepTimeMinutes"),
+                        isFoodOrder ? 25 : 15
+                );
+                int deliveryMins = toInt(
+                        meta.get("estimatedDeliveryMinutes") != null ? meta.get("estimatedDeliveryMinutes") : meta.get("durationMinutes"),
+                        45
+                );
+                maxReadyMinutes = maxReadyMinutes == null ? readyMins : Math.max(maxReadyMinutes, readyMins);
+                maxDeliveryMinutes = maxDeliveryMinutes == null ? deliveryMins : Math.max(maxDeliveryMinutes, deliveryMins);
+
+                boolean itemReturnable = !(meta.get("returnable") instanceof Boolean r) || r;
+                if (!itemReturnable) {
+                    allReturnable = false;
+                }
+                int winDays = toInt(meta.get("returnWindowDays"), itemReturnable ? 3 : 0);
+                if (itemReturnable) {
+                    minReturnWindowDays = Math.min(minReturnWindowDays, Math.max(1, winDays));
+                }
+                double lossPct = Math.min(100.0, Math.max(0.0, toDouble(meta.get("returnLossPercent"), 0.0)));
+                double lossFixed = Math.max(0.0, toDouble(meta.get("returnLossFixedEtb"), 0.0));
+                maxReturnLossPercent = Math.max(maxReturnLossPercent, lossPct);
+                totalFixedLossEtb += lossFixed * item.quantity();
+                if (meta.get("deliveryFeeNonRefundableOnReturn") instanceof Boolean nonRef && nonRef) {
+                    anyDeliveryFeeNonRefundable = true;
+                } else if (!meta.containsKey("deliveryFeeNonRefundableOnReturn")) {
+                    anyDeliveryFeeNonRefundable = true;
+                }
+                if (meta.get("returnPolicyNote") instanceof String noteStr && !noteStr.isBlank()) {
+                    policyNotes.add(noteStr.trim());
+                }
+
                 BigDecimal origPrice = listing.getBasePrice();
                 BigDecimal activePrice = listing.getDiscountPrice() != null ? listing.getDiscountPrice() : origPrice;
                 BigDecimal qty = BigDecimal.valueOf(item.quantity());
@@ -92,9 +158,14 @@ public class OrderAndBookingService {
                 Map<String, Object> snap = new LinkedHashMap<>();
                 snap.put("listingId", listing.getId());
                 snap.put("title", listing.getTitle());
+                snap.put("listingType", listing.getListingType());
                 snap.put("quantity", item.quantity());
                 snap.put("unitPrice", activePrice);
                 snap.put("lineTotal", lineTotal);
+                snap.put("deliveryAvailable", itemDeliveryAvailable);
+                snap.put("returnable", itemReturnable);
+                snap.put("returnLossPercent", lossPct);
+                snap.put("returnLossFixedEtb", lossFixed);
                 if (item.variant() != null) snap.put("variant", item.variant());
                 snapshot.add(snap);
             }
@@ -104,6 +175,33 @@ public class OrderAndBookingService {
             BigDecimal taxAmount = subtotal.multiply(BigDecimal.valueOf(taxRate / 100.0)).setScale(2, RoundingMode.HALF_UP);
             BigDecimal totalAmount = subtotal.add(deliveryFee).add(taxAmount).setScale(2, RoundingMode.HALF_UP);
             String orderNumber = "NY-ORD-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+
+            int resolvedReadyMins = maxReadyMinutes != null ? maxReadyMinutes : (isFoodOrder ? 25 : 15);
+            int resolvedDeliveryMins = "DELIVERY".equalsIgnoreCase(group.fulfillmentType())
+                    ? Math.max(resolvedReadyMins, maxDeliveryMinutes != null ? maxDeliveryMinutes : 45)
+                    : resolvedReadyMins;
+
+            double subtotalDouble = subtotal.doubleValue();
+            double deliveryDouble = deliveryFee.doubleValue();
+            double itemLossEtb = !allReturnable
+                    ? subtotalDouble
+                    : Math.min(subtotalDouble, (subtotalDouble * (maxReturnLossPercent / 100.0)) + totalFixedLossEtb);
+            double deliveryLossEtb = (!allReturnable || anyDeliveryFeeNonRefundable) ? deliveryDouble : 0.0;
+            double totalLossEtb = BigDecimal.valueOf(itemLossEtb + deliveryLossEtb).setScale(2, RoundingMode.HALF_UP).doubleValue();
+
+            Map<String, Object> returnPolicySnap = new LinkedHashMap<>();
+            returnPolicySnap.put("deliveryAvailable", groupDeliverySupported);
+            returnPolicySnap.put("returnable", allReturnable);
+            returnPolicySnap.put("returnWindowDays", allReturnable ? minReturnWindowDays : 0);
+            returnPolicySnap.put("returnLossPercent", allReturnable ? maxReturnLossPercent : 100.0);
+            returnPolicySnap.put("returnLossFixedEtb", allReturnable ? totalFixedLossEtb : 0.0);
+            returnPolicySnap.put("deliveryFeeNonRefundableOnReturn", !allReturnable || anyDeliveryFeeNonRefundable);
+            returnPolicySnap.put("estimatedItemLossOnReturnEtb", BigDecimal.valueOf(itemLossEtb).setScale(2, RoundingMode.HALF_UP));
+            returnPolicySnap.put("estimatedDeliveryLossOnReturnEtb", BigDecimal.valueOf(deliveryLossEtb).setScale(2, RoundingMode.HALF_UP));
+            returnPolicySnap.put("estimatedTotalLossOnReturnEtb", totalLossEtb);
+            if (!policyNotes.isEmpty()) {
+                returnPolicySnap.put("returnPolicyNote", String.join(" · ", policyNotes));
+            }
 
             CustomerOrder order = new CustomerOrder();
             order.setOrderNumber(orderNumber);
@@ -122,7 +220,21 @@ public class OrderAndBookingService {
             order.setDeliveryAddress(group.deliveryAddress());
             order.setPaymentMethod(req.paymentMethod());
             order.setPaymentStatus("CASH".equalsIgnoreCase(req.paymentMethod()) ? "PENDING" : "SUCCESSFUL");
-            order.setOrderStatus("CONFIRMED");
+            order.setEstimatedReadyMinutes(resolvedReadyMins);
+            order.setEstimatedDeliveryMinutes(resolvedDeliveryMins);
+            order.setReturnPolicySnapshot(returnPolicySnap);
+
+            if (isFoodOrder || !groupImmediateAcceptance) {
+                order.setImmediateAcceptance(false);
+                order.setOrderStatus("REQUESTED");
+            } else {
+                Instant now = Instant.now();
+                order.setImmediateAcceptance(true);
+                order.setOrderStatus("ACCEPTED");
+                order.setAcceptedAt(now);
+                order.setEstimatedReadyAt(now.plusSeconds(resolvedReadyMins * 60L));
+                order.setEstimatedDeliveryAt(now.plusSeconds(resolvedDeliveryMins * 60L));
+            }
             order = orderRepo.save(order);
 
             BigDecimal commissionAmount = subtotal.multiply(commissionRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
@@ -157,7 +269,12 @@ public class OrderAndBookingService {
             log.setAction("ORDER_PLACED");
             log.setEntityType("order");
             log.setEntityId(orderNumber);
-            log.setDetails(Map.of("totalAmount", totalAmount, "businessId", group.businessId()));
+            log.setDetails(Map.of(
+                    "totalAmount", totalAmount,
+                    "businessId", group.businessId(),
+                    "orderStatus", order.getOrderStatus(),
+                    "immediateAcceptance", order.isImmediateAcceptance()
+            ));
             auditLogRepo.save(log);
 
             createdOrders.add(order);
@@ -166,8 +283,9 @@ public class OrderAndBookingService {
     }
 
     @Transactional
-    public CustomerOrder updateOrderStatus(UserPrincipal principal, Long orderId, String orderStatus) {
-        if (!Set.of("PENDING", "CONFIRMED", "PREPARING", "READY", "OUT_FOR_DELIVERY", "COMPLETED", "CANCELLED").contains(orderStatus)) {
+    public CustomerOrder updateOrderStatus(UserPrincipal principal, Long orderId, UpdateOrderStatusRequest req) {
+        String orderStatus = req.orderStatus().trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("REQUESTED", "PENDING", "ACCEPTED", "REJECTED", "CONFIRMED", "PREPARING", "READY", "OUT_FOR_DELIVERY", "COMPLETED", "CANCELLED").contains(orderStatus)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid order status.");
         }
         CustomerOrder order = orderRepo.findById(orderId)
@@ -179,11 +297,43 @@ public class OrderAndBookingService {
         boolean isCustomer = order.getCustomerUid().equals(principal.uid());
         if (!principal.isAdmin() && !isOwner) {
             boolean canCancel = isCustomer && "CANCELLED".equals(orderStatus)
-                    && ("PENDING".equals(order.getOrderStatus()) || "CONFIRMED".equals(order.getOrderStatus()));
+                    && Set.of("REQUESTED", "PENDING", "CONFIRMED", "ACCEPTED").contains(order.getOrderStatus());
             if (!canCancel) {
                 throw new ApiException(HttpStatus.FORBIDDEN,
                         "Permission denied: only the business owner or admin can update order fulfillment.");
             }
+        }
+
+        Instant now = Instant.now();
+        if ("ACCEPTED".equals(orderStatus) || "CONFIRMED".equals(orderStatus) || "PREPARING".equals(orderStatus)) {
+            if (order.getAcceptedAt() == null) {
+                order.setAcceptedAt(now);
+            }
+            Integer reqReady = req.estimatedReadyMinutes();
+            Integer reqDelivery = req.estimatedDeliveryMinutes();
+            if (reqReady != null && reqReady > 0) {
+                order.setEstimatedReadyMinutes(reqReady);
+                order.setEstimatedReadyAt(now.plusSeconds(reqReady * 60L));
+            } else if (order.getEstimatedReadyAt() == null) {
+                int fallbackReady = order.getEstimatedReadyMinutes() != null ? order.getEstimatedReadyMinutes() : 25;
+                order.setEstimatedReadyMinutes(fallbackReady);
+                order.setEstimatedReadyAt(now.plusSeconds(fallbackReady * 60L));
+            }
+            if (reqDelivery != null && reqDelivery > 0) {
+                order.setEstimatedDeliveryMinutes(reqDelivery);
+                order.setEstimatedDeliveryAt(now.plusSeconds(reqDelivery * 60L));
+            } else if (order.getEstimatedDeliveryAt() == null) {
+                int readyBase = order.getEstimatedReadyMinutes() != null ? order.getEstimatedReadyMinutes() : 25;
+                int fallbackDelivery = order.getEstimatedDeliveryMinutes() != null
+                        ? order.getEstimatedDeliveryMinutes()
+                        : ("DELIVERY".equalsIgnoreCase(order.getFulfillmentType()) ? readyBase + 20 : readyBase);
+                order.setEstimatedDeliveryMinutes(fallbackDelivery);
+                order.setEstimatedDeliveryAt(now.plusSeconds(fallbackDelivery * 60L));
+            }
+        }
+
+        if ("REJECTED".equals(orderStatus) && req.rejectionReason() != null && !req.rejectionReason().isBlank()) {
+            order.setRejectionReason(req.rejectionReason().trim());
         }
 
         order.setOrderStatus(orderStatus);
@@ -195,7 +345,11 @@ public class OrderAndBookingService {
         log.setAction("ORDER_STATUS_UPDATED");
         log.setEntityType("order");
         log.setEntityId(String.valueOf(orderId));
-        log.setDetails(Map.of("orderStatus", orderStatus));
+        log.setDetails(Map.of(
+                "orderStatus", orderStatus,
+                "estimatedReadyMinutes", saved.getEstimatedReadyMinutes() != null ? saved.getEstimatedReadyMinutes() : 0,
+                "estimatedDeliveryMinutes", saved.getEstimatedDeliveryMinutes() != null ? saved.getEstimatedDeliveryMinutes() : 0
+        ));
         auditLogRepo.save(log);
 
         return saved;
@@ -408,6 +562,14 @@ public class OrderAndBookingService {
         if (value instanceof Number n) return n.doubleValue();
         if (value instanceof String s) {
             try { return Double.parseDouble(s); } catch (NumberFormatException ignored) {}
+        }
+        return fallback;
+    }
+
+    private int toInt(Object value, int fallback) {
+        if (value instanceof Number n) return n.intValue();
+        if (value instanceof String s) {
+            try { return (int) Math.round(Double.parseDouble(s)); } catch (NumberFormatException ignored) {}
         }
         return fallback;
     }

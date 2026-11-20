@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { Business, Listing } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
 import { formatPricingModelLabel } from '../utils/i18n.ts';
+import { getListingPolicy } from '../utils/listingPolicy.ts';
 import { getPublicProviderLabel } from '../utils/sellerDisplay.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -149,6 +150,60 @@ export const CompareDrawer: React.FC<CompareDrawerProps> = ({
                             : 'None'}
                     </td>
                   ))}
+                </tr>
+                <tr>
+                  <td className="py-3 pr-4 font-medium text-[#172B3A]/65">Delivery &amp; Acceptance</td>
+                  {listings.map((item) => {
+                    const isOrderable = item.listingType === 'PRODUCT' || item.listingType === 'FOOD';
+                    if (!isOrderable) {
+                      return (
+                        <td key={item.id} className="px-4 py-3 text-[#172B3A]/65">
+                          Direct Contact &amp; Service Contract
+                        </td>
+                      );
+                    }
+                    const pol = getListingPolicy(item);
+                    return (
+                      <td key={item.id} className="px-4 py-3 text-[#172B3A]">
+                        {pol.deliveryAvailable
+                          ? `With Delivery (~${pol.estimatedDeliveryMinutes} min)`
+                          : 'Without Delivery (Pickup Only)'}{' '}
+                        ·{' '}
+                        {pol.isFood
+                          ? 'Order Request'
+                          : pol.immediateAcceptance
+                            ? `Immediate Accept (~${pol.estimatedReadyMinutes} min)`
+                            : 'Seller Accept'}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td className="py-3 pr-4 font-medium text-[#172B3A]/65">If Unsatisfied (Return Loss)</td>
+                  {listings.map((item) => {
+                    const isOrderable = item.listingType === 'PRODUCT' || item.listingType === 'FOOD';
+                    if (!isOrderable) {
+                      return (
+                        <td key={item.id} className="px-4 py-3 text-[#172B3A]/65">
+                          Per Service Contract Terms
+                        </td>
+                      );
+                    }
+                    const pol = getListingPolicy(item);
+                    return (
+                      <td key={item.id} className="px-4 py-3 font-mono tabular-nums text-[#172B3A]">
+                        {pol.returnable
+                          ? `${pol.returnWindowDays}d · ${pol.returnLossPercent}% + ${formatEtb(pol.returnLossFixedEtb)}${
+                              pol.deliveryAvailable
+                                ? pol.deliveryFeeNonRefundableOnReturn
+                                  ? ' · Loses delivery fee'
+                                  : ' · Delivery refunded'
+                                : ''
+                            }`
+                          : 'Non-Returnable (100% loss)'}
+                      </td>
+                    );
+                  })}
                 </tr>
                 <tr>
                   <td className="py-3 pr-4 font-medium text-[#172B3A]/65">Rating & Availability</td>
