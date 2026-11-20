@@ -919,8 +919,9 @@ public class EngagementService {
 
         UserAccount otherUser = null;
         if (otherPartyUid != null && !otherPartyUid.isBlank()) {
-            otherUser = userRepo.findByUid(otherPartyUid)
-                    .orElseGet(() -> userRepo.findByFirebaseUid(otherPartyUid).orElse(null));
+            final String lookupUid = otherPartyUid;
+            otherUser = userRepo.findByUid(lookupUid)
+                    .orElseGet(() -> userRepo.findByFirebaseUid(lookupUid).orElse(null));
         }
 
         Map<String, Object> out = new LinkedHashMap<>();
