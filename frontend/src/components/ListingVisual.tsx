@@ -54,7 +54,7 @@ export const ListingVisual: React.FC<ListingVisualProps> = ({
   title,
   listingType,
   className = 'h-48 w-full',
-  autoRotateMs = 2600,
+  autoRotateMs = 5000,
   showSlideControls = false,
   activeSlideIndex,
   onSlideChange,
@@ -95,14 +95,12 @@ export const ListingVisual: React.FC<ListingVisualProps> = ({
   useEffect(() => {
     if (slides.length <= 1) return;
     const timer = setInterval(() => {
-      setInternalIdx((prev) => {
-        const next = (prev + 1) % slides.length;
-        onSlideChange?.(next);
-        return next;
-      });
+      const next = (currentIdx + 1) % slides.length;
+      setInternalIdx(next);
+      onSlideChange?.(next);
     }, autoRotateMs);
     return () => clearInterval(timer);
-  }, [slides.length, autoRotateMs, onSlideChange]);
+  }, [slides.length, autoRotateMs, currentIdx, onSlideChange]);
 
   const handleMarkFailed = (src: string) => {
     setFailedSrcs((prev) => ({ ...prev, [src]: true }));

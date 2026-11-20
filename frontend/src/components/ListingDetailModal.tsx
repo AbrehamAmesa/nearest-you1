@@ -1277,7 +1277,6 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                         type="button"
                         onClick={() => {
                           onAddToCart(listing, business, activeVariant);
-                          onActionSuccess(`Added "${listing.title}" to cart.`);
                           onClose();
                         }}
                         className="w-full min-h-[44px] rounded-lg bg-[#176B52] px-5 py-3 text-sm font-semibold text-white hover:bg-[#125641]"

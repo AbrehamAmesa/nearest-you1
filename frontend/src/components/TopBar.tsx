@@ -226,6 +226,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   ) : (
                     orderedNotifications.map((item) => {
                       const isMessage = item.kind === 'message';
+                      const isError = item.kind === 'error';
                       const ItemIcon = isMessage ? MessageSquare : Bell;
                       return (
                         <div
@@ -234,7 +235,9 @@ export const TopBar: React.FC<TopBarProps> = ({
                             !item.read
                               ? isMessage
                                 ? 'bg-emerald-50/70'
-                                : 'bg-amber-50/60'
+                                : isError
+                                  ? 'bg-red-50/75'
+                                  : 'bg-amber-50/60'
                               : 'bg-white opacity-75'
                           }`}
                         >
@@ -243,7 +246,9 @@ export const TopBar: React.FC<TopBarProps> = ({
                               !item.read
                                 ? isMessage
                                   ? 'border-[#176B52]/30 bg-[#176B52] text-white'
-                                  : 'border-[#F4A62A]/50 bg-[#172B3A] text-[#F4A62A]'
+                                  : isError
+                                    ? 'border-red-300 bg-red-700 text-white'
+                                    : 'border-[#F4A62A]/50 bg-[#172B3A] text-[#F4A62A]'
                                 : 'border-[#172B3A]/15 bg-[#F4F6F5] text-[#172B3A]/60'
                             }`}
                           >
@@ -363,6 +368,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <img
                   src={avatarUrl}
                   alt={accountFirstName}
+                  referrerPolicy="no-referrer"
                   className="h-6 w-6 rounded-full border border-white/40 object-cover"
                 />
               ) : (

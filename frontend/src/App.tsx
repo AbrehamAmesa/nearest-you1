@@ -12,11 +12,7 @@ import { ListingDetailModal } from './components/ListingDetailModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { AccountProfileModal } from './components/AccountProfileModal.tsx';
 import { JobSeekerAdvertiseModal } from './components/JobSeekerAdvertiseModal.tsx';
-import {
-  NotificationCenter,
-  type AppNotification,
-  type NotificationKind,
-} from './components/NotificationCenter.tsx';
+import type { AppNotification, NotificationKind } from './components/NotificationCenter.tsx';
 import { useLiveChatInboxListener } from './hooks/useLiveChat.ts';
 import type { AppLanguage } from './utils/i18n.ts';
 import { catalogApi, engagementApi, userApi } from './api/index.ts';
@@ -62,6 +58,67 @@ const DEFAULT_GOVERNANCE: OnboardingGovernance = {
   allowedApproverRoles: ['ADMIN', 'SUPER_ADMIN', 'PROVIDER_APPROVER'],
   requirePeerQrAfterFirstProvider: true,
 };
+
+const ROUTINE_NON_NOTIFICATION_RE =
+  /^(Added ".*" to cart\.|You cannot order your own advertisement\.|You can compare up to 3 listings|Welcome back,|Account created for |Signed in as |Signed out\.|Profile updated\.|Account security updated\.|Password reset link sent|Exact location updated|Browser GPS is unavailable|Browser geolocation is unavailable|GPS permission not granted|Could not access GPS|Updated your ad coordinates|Live GPS ping sent|Real-time service GPS broadcast updated|Unable to read device GPS|QR voucher token copied\.|Alive \/ Liveness biometric test passed|Liveness verification frame sealed\.|Fresh .*Peer QR voucher generated\.|Saved changes to |Removed "|".*" marked (AVAILABLE|UNAVAILABLE|ACTIVE|PAUSED|INACTIVE)|Service ".*" (marked|deleted)|Document Type ".*" (marked|deleted)|Mapped ".*" to service|Service document mapping removed|Platform pricing.*updated|Onboarding Peer QR.*saved|User .* marked |.* Admin access (granted|revoked)|Updated roles for |.* early vouch|Enter a Delivery Tracking Code|Select or pin both Start|Enter the 6-digit handover OTP|Register and select an active Document Type first|Verified transaction review published\.)/i;
+
+function classifyNecessaryNotification(
+  rawMessage: string,
+  explicitKind?: NotificationKind
+): { necessary: true; kind: NotificationKind; defaultTitle: string } | { necessary: false } {
+  const msg = rawMessage.trim();
+  if (!msg) return { necessary: false };
+
+  if (explicitKind === 'message') {
+    return { necessary: true, kind: 'message', defaultTitle: 'Message Delivered' };
+  }
+  if (explicitKind === 'offer') {
+    return { necessary: true, kind: 'offer', defaultTitle: 'Offer & Request Delivered' };
+  }
+  if (explicitKind === 'error') {
+    return { necessary: true, kind: 'error', defaultTitle: 'Connection Notice' };
+  }
+
+  if (ROUTINE_NON_NOTIFICATION_RE.test(msg)) {
+    return { necessary: false };
+  }
+
+  if (/\b(new message|message delivered|chat reply|replied to)\b/i.test(msg)) {
+    return { necessary: true, kind: 'message', defaultTitle: 'Message Delivered' };
+  }
+
+  if (
+    /\b(order|booking|service request|application offer|revised quotation|quotation|escrow|conflict|counter-statement|dispatched|assignment updated|kyc submitted|first-provider registration|peer authenticated|provider registration|provider kyc|provider authority|business verification|business approval|registered with live coordinates|applicant status)\b/i.test(
+      msg
+    )
+  ) {
+    return { necessary: true, kind: 'offer', defaultTitle: 'Offer & Request Delivered' };
+  }
+
+  if (
+    /\b(connection error|failed to|could not|unable to|transition rejected|approval action failed|request failed)\b/i.test(
+      msg
+    )
+  ) {
+    return { necessary: true, kind: 'error', defaultTitle: 'Connection Notice' };
+  }
+
+  return { necessary: false };
+}
+
+function filterNecessaryNotifications(items: unknown): AppNotification[] {
+  if (!Array.isArray(items)) return [];
+  return items.filter(
+    (item): item is AppNotification =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      typeof (item as AppNotification).message === 'string' &&
+      ((item as AppNotification).kind === 'message' ||
+        (item as AppNotification).kind === 'offer' ||
+        (item as AppNotification).kind === 'error') &&
+      !ROUTINE_NON_NOTIFICATION_RE.test((item as AppNotification).message.trim())
+  );
+}
 
 const INITIAL_LOCATION: DetectedLocation = {
   lat: 9.005401,
@@ -132,8 +189,7 @@ function NearestYouWorkspace() {
     try {
       const raw = window.localStorage.getItem('ny_notifications_v2_guest');
       if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      return filterNecessaryNotifications(JSON.parse(raw));
     } catch {
       return [];
     }
@@ -144,11 +200,8 @@ function NearestYouWorkspace() {
     try {
       const raw = window.localStorage.getItem(notificationStorageKey);
       if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setNotifications(parsed);
-          return;
-        }
+        setNotifications(filterNecessaryNotifications(JSON.parse(raw)));
+        return;
       }
       setNotifications([]);
     } catch {
@@ -194,25 +247,11 @@ function NearestYouWorkspace() {
           }
     ) => {
       const rawMessage = typeof input === 'string' ? input : input.message;
-      const inferredKind: NotificationKind =
-        typeof input !== 'string' && input.kind
-          ? input.kind
-          : /connection error|failed|cannot|unable|unavailable/i.test(rawMessage)
-            ? 'error'
-            : /message|chat|reply/i.test(rawMessage)
-              ? 'message'
-              : /offer|quote|proposal|order|booking|request|application|reserve/i.test(rawMessage)
-                ? 'offer'
-                : 'success';
-
-      const defaultTitle =
-        inferredKind === 'message'
-          ? 'Message Delivered'
-          : inferredKind === 'offer'
-            ? 'Offer & Request Delivered'
-            : inferredKind === 'error'
-              ? 'Connection Notice'
-              : 'Update';
+      const explicitKind = typeof input !== 'string' ? input.kind : undefined;
+      const classification = classifyNecessaryNotification(rawMessage, explicitKind);
+      if (!classification.necessary) {
+        return;
+      }
 
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const timestamp = new Date().toLocaleTimeString([], {
@@ -222,8 +261,8 @@ function NearestYouWorkspace() {
 
       const entry: AppNotification = {
         id,
-        kind: inferredKind,
-        title: (typeof input !== 'string' && input.title) || defaultTitle,
+        kind: classification.kind,
+        title: (typeof input !== 'string' && input.title) || classification.defaultTitle,
         message: rawMessage,
         timestamp,
         read: false,
@@ -312,12 +351,9 @@ function NearestYouWorkspace() {
   }, []);
 
   const detectExactLocation = useCallback(
-    (userTriggered = false) => {
+    (_userTriggered = false) => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
         setDetectingLocation(false);
-        if (userTriggered) {
-          notify('Browser GPS is unavailable; using backend IP-detected location.');
-        }
         return;
       }
 
@@ -349,9 +385,6 @@ function NearestYouWorkspace() {
             if (data.businesses) setBusinesses(data.businesses);
             if (data.listings) setListings(data.listings);
             if (data.liveProviders) setLiveProviders(data.liveProviders);
-            if (userTriggered) {
-              notify(`Exact location updated: ${data.detectedLocation?.label || `${lat}, ${lng}`}`);
-            }
           } catch {
             setDetectedLocation((prev) => ({
               ...prev,
@@ -366,14 +399,11 @@ function NearestYouWorkspace() {
         },
         () => {
           setDetectingLocation(false);
-          if (userTriggered) {
-            notify('GPS permission not granted; using backend-detected location.');
-          }
         },
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
       );
     },
-    [firebaseUser, notify]
+    [firebaseUser]
   );
 
   useEffect(() => {
@@ -411,7 +441,6 @@ function NearestYouWorkspace() {
           (firebaseUser?.uid && business.ownerUid === firebaseUser.uid))
     );
     if (isOwnListing) {
-      notify('You cannot order your own advertisement.');
       setListingInitialEditMode(false);
       setSelectedListing(listing);
       return;
@@ -425,7 +454,6 @@ function NearestYouWorkspace() {
       }
       return [...prev, { listing, business, quantity: 1, variant }];
     });
-    notify(`Added "${listing.title}" to cart.`);
   };
 
   const handleUpdateQty = (listingId: number, delta: number) => {
@@ -440,7 +468,6 @@ function NearestYouWorkspace() {
     setCompareIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
       if (prev.length >= 3) {
-        notify('You can compare up to 3 listings side by side.');
         return prev;
       }
       return [...prev, id];
@@ -738,14 +765,6 @@ function NearestYouWorkspace() {
           setListingInitialEditMode(true);
           setSelectedListing(ad);
         }}
-      />
-
-      <NotificationCenter
-        notifications={notifications}
-        onMarkAsRead={markNotificationRead}
-        onMarkAllRead={markAllNotificationsRead}
-        onExecuteAction={executeNotificationAction}
-        onOpenInbox={() => setNotificationsInboxOpen(true)}
       />
     </div>
   );
