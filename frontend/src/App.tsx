@@ -124,10 +124,60 @@ function NearestYouWorkspace() {
   const [jobSeekerModalOpen, setJobSeekerModalOpen] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [listingInitialEditMode, setListingInitialEditMode] = useState(false);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notificationsInboxOpen, setNotificationsInboxOpen] = useState(false);
 
-  const dismissNotification = useCallback((id: string) => {
-    setNotifications((prev) => prev.filter((item) => item.id !== id));
+  const notificationStorageKey = `ny_notifications_v2_${dbUser?.uid || 'guest'}`;
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem('ny_notifications_v2_guest');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(notificationStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setNotifications(parsed);
+          return;
+        }
+      }
+      setNotifications([]);
+    } catch {
+      setNotifications([]);
+    }
+  }, [notificationStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const serializable = notifications.slice(-30).map(({ onAction: _omit, ...rest }) => rest);
+      window.localStorage.setItem(notificationStorageKey, JSON.stringify(serializable));
+    } catch {
+      /* ignore storage quota errors */
+    }
+  }, [notifications, notificationStorageKey]);
+
+  const markNotificationRead = useCallback((id: string) => {
+    setNotifications((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, read: true } : item))
+    );
+  }, []);
+
+  const markAllNotificationsRead = useCallback(() => {
+    setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+  }, []);
+
+  const clearReadNotifications = useCallback(() => {
+    setNotifications((prev) => prev.filter((item) => !item.read));
   }, []);
 
   const pushNotification = useCallback(
@@ -139,6 +189,7 @@ function NearestYouWorkspace() {
             title?: string;
             message: string;
             actionLabel?: string;
+            actionTarget?: AppSection;
             onAction?: () => void;
           }
     ) => {
@@ -175,17 +226,28 @@ function NearestYouWorkspace() {
         title: (typeof input !== 'string' && input.title) || defaultTitle,
         message: rawMessage,
         timestamp,
+        read: false,
         actionLabel: typeof input !== 'string' ? input.actionLabel : undefined,
+        actionTarget: typeof input !== 'string' ? input.actionTarget : undefined,
         onAction: typeof input !== 'string' ? input.onAction : undefined,
       };
 
-      setNotifications((prev) => [...prev.slice(-3), entry]);
-
-      window.setTimeout(() => {
-        setNotifications((prev) => prev.filter((item) => item.id !== id));
-      }, 6500);
+      setNotifications((prev) => [...prev.slice(-29), entry]);
     },
     []
+  );
+
+  const executeNotificationAction = useCallback(
+    (item: AppNotification) => {
+      markNotificationRead(item.id);
+      if (item.onAction) {
+        item.onAction();
+      } else if (item.actionTarget) {
+        setSelectedListing(null);
+        setActiveSection(item.actionTarget);
+      }
+    },
+    [markNotificationRead]
   );
 
   const notify = useCallback(
@@ -408,6 +470,8 @@ function NearestYouWorkspace() {
     const ownsBusiness = businesses.some(
       (b) => b.id === incomingMsg.businessId && b.ownerUid === dbUser.uid
     );
+    const targetSection: AppSection =
+      ownsBusiness && isVerifiedProvider ? 'business' : 'activity';
     pushNotification({
       kind: 'message',
       title: `New Message · ${incomingMsg.senderName}`,
@@ -416,14 +480,13 @@ function NearestYouWorkspace() {
           ? `${incomingMsg.body.slice(0, 93)}...`
           : incomingMsg.body,
       actionLabel: 'Open Messages',
+      actionTarget: targetSection,
       onAction: () => {
         setSelectedListing(null);
-        if (ownsBusiness && isVerifiedProvider) {
+        if (targetSection === 'business') {
           setBusinessInitialTab('CATALOG');
-          setActiveSection('business');
-        } else {
-          setActiveSection('activity');
         }
+        setActiveSection(targetSection);
       },
     });
   });
@@ -449,6 +512,14 @@ function NearestYouWorkspace() {
           setActiveSection(next);
         }}
         onOpenAccountModal={() => setAccountOpen(true)}
+        notifications={notifications}
+        inboxOpen={notificationsInboxOpen}
+        onToggleInbox={() => setNotificationsInboxOpen((prev) => !prev)}
+        onCloseInbox={() => setNotificationsInboxOpen(false)}
+        onMarkNotificationRead={markNotificationRead}
+        onMarkAllNotificationsRead={markAllNotificationsRead}
+        onClearReadNotifications={clearReadNotifications}
+        onExecuteNotificationAction={executeNotificationAction}
       />
 
       {catalogError && (
@@ -580,6 +651,7 @@ function NearestYouWorkspace() {
             title: 'Offer & Order Delivered',
             message: `Order confirmed: ${refs.join(', ')}`,
             actionLabel: 'View Orders',
+            actionTarget: 'activity',
             onAction: () => setActiveSection('activity'),
           });
           setActiveSection('activity');
@@ -619,6 +691,7 @@ function NearestYouWorkspace() {
             title: `Message Delivered · ${recipientLabel}`,
             message: preview.length > 90 ? `${preview.slice(0, 87)}...` : preview,
             actionLabel: 'View Chat',
+            actionTarget: 'activity',
             onAction: () => {
               setSelectedListing(null);
               setActiveSection('activity');
@@ -669,7 +742,10 @@ function NearestYouWorkspace() {
 
       <NotificationCenter
         notifications={notifications}
-        onDismiss={dismissNotification}
+        onMarkAsRead={markNotificationRead}
+        onMarkAllRead={markAllNotificationsRead}
+        onExecuteAction={executeNotificationAction}
+        onOpenInbox={() => setNotificationsInboxOpen(true)}
       />
     </div>
   );

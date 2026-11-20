@@ -179,17 +179,7 @@ public class UserSyncService {
         UserAccount user = userRepo.findByUid(uid)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User profile not found."));
         user.setPasswordHash(passwordEncoder.encode(rawPassword));
-        UserAccount saved = userRepo.save(user);
-        if (req.fullName() != null && !req.fullName().isBlank()) {
-            String nextName = req.fullName().trim();
-            for (Business biz : businessRepo.findByOwnerUidOrderByIdAsc(uid)) {
-                if ("INDIVIDUAL_JOB_SEEKER".equalsIgnoreCase(biz.getProfileType())) {
-                    biz.setBusinessName(nextName);
-                    businessRepo.save(biz);
-                }
-            }
-        }
-        return saved;
+        return userRepo.save(user);
     }
 
     @Transactional
@@ -236,7 +226,17 @@ public class UserSyncService {
             String trimmedPhoto = req.profilePhotoUrl().trim();
             user.setProfilePhotoUrl(trimmedPhoto.isEmpty() ? null : trimmedPhoto);
         }
-        return userRepo.save(user);
+        UserAccount saved = userRepo.save(user);
+        if (req.fullName() != null && !req.fullName().isBlank()) {
+            String nextName = req.fullName().trim();
+            for (Business biz : businessRepo.findByOwnerUidOrderByIdAsc(uid)) {
+                if ("INDIVIDUAL_JOB_SEEKER".equalsIgnoreCase(biz.getProfileType())) {
+                    biz.setBusinessName(nextName);
+                    businessRepo.save(biz);
+                }
+            }
+        }
+        return saved;
     }
 
     @Transactional

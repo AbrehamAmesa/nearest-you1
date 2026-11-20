@@ -318,7 +318,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Application failed.');
-      onActionSuccess(`Application submitted to ${business.businessName}.`);
+      onActionSuccess(`Application offer submitted for "${listing.title}".`);
       onClose();
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to submit application.');

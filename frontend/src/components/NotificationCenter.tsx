@@ -1,13 +1,11 @@
 import React from 'react';
 import {
-  AlertCircle,
   ArrowRight,
-  BadgeCheck,
+  Bell,
   CheckCheck,
-  CheckCircle2,
   MessageSquare,
-  X,
 } from 'lucide-react';
+import type { AppSection } from './TopBar.tsx';
 
 export type NotificationKind = 'message' | 'offer' | 'success' | 'error';
 
@@ -17,145 +15,175 @@ export interface AppNotification {
   title: string;
   message: string;
   timestamp: string;
+  read: boolean;
   actionLabel?: string;
+  actionTarget?: AppSection;
   onAction?: () => void;
 }
 
 interface NotificationCenterProps {
   notifications: AppNotification[];
-  onDismiss: (id: string) => void;
+  onMarkAsRead: (id: string) => void;
+  onMarkAllRead: () => void;
+  onExecuteAction: (item: AppNotification) => void;
+  onOpenInbox?: () => void;
 }
 
 export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   notifications,
-  onDismiss,
+  onMarkAsRead,
+  onMarkAllRead,
+  onExecuteAction,
+  onOpenInbox,
 }) => {
-  if (notifications.length === 0) return null;
+  const unread = notifications.filter((n) => !n.read);
+  if (unread.length === 0) return null;
+
+  const visibleUnread = unread.slice(-2).reverse();
+  const hiddenCount = Math.max(0, unread.length - visibleUnread.length);
 
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-3 bottom-4 z-[1300] flex flex-col gap-2.5 sm:inset-x-auto sm:bottom-5 sm:right-5 sm:w-[390px]"
+      className="pointer-events-none fixed inset-x-3 bottom-4 z-[1300] flex flex-col gap-2.5 sm:inset-x-auto sm:bottom-5 sm:right-5 sm:w-[400px]"
     >
-      {notifications.map((item) => {
+      {hiddenCount > 0 && (
+        <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-xl border border-[#172B3A]/20 bg-[#172B3A] px-3.5 py-2 text-xs text-white shadow-lg">
+          <span className="inline-flex items-center gap-2 font-semibold">
+            <Bell className="h-3.5 w-3.5 text-[#F4A62A]" />
+            <span>
+              +{hiddenCount} more unread {hiddenCount === 1 ? 'notification' : 'notifications'}
+            </span>
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            {onOpenInbox && (
+              <button
+                type="button"
+                onClick={onOpenInbox}
+                className="rounded-md bg-white/15 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/25"
+              >
+                View All
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onMarkAllRead}
+              className="rounded-md bg-[#176B52] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#125641]"
+            >
+              Mark all read
+            </button>
+          </div>
+        </div>
+      )}
+
+      {visibleUnread.map((item) => {
         const isMessage = item.kind === 'message';
         const isOffer = item.kind === 'offer';
         const isError = item.kind === 'error';
 
-        const containerClasses = isMessage
-          ? 'border-[#176B52]/35 bg-white text-[#172B3A] shadow-2xl ring-1 ring-[#176B52]/10'
+        const headerBg = isMessage
+          ? 'bg-[#176B52] text-white'
           : isOffer
-            ? 'border-[#F4A62A]/60 bg-[#FFFDF8] text-[#172B3A] shadow-2xl ring-1 ring-[#F4A62A]/20'
+            ? 'bg-[#172B3A] text-white'
             : isError
-              ? 'border-red-300 bg-red-50 text-red-950 shadow-2xl'
-              : 'border-[#172B3A]/15 bg-[#172B3A] text-white shadow-2xl';
+              ? 'bg-red-800 text-white'
+              : 'bg-[#172B3A] text-white';
 
-        const iconBoxClasses = isMessage
-          ? 'bg-emerald-50 text-[#176B52] border border-[#176B52]/20'
+        const borderClass = isMessage
+          ? 'border-[#176B52]/35'
           : isOffer
-            ? 'bg-amber-50 text-[#B7740B] border border-[#F4A62A]/40'
+            ? 'border-[#F4A62A]/60'
             : isError
-              ? 'bg-red-100 text-red-700 border border-red-200'
-              : 'bg-white/10 text-[#F4A62A] border border-white/15';
+              ? 'border-red-300'
+              : 'border-[#172B3A]/20';
 
-        const Icon = isMessage
-          ? MessageSquare
+        const kindBadgeLabel = isMessage
+          ? 'Unread Message'
           : isOffer
-            ? BadgeCheck
+            ? 'Unread Offer / Request'
             : isError
-              ? AlertCircle
-              : CheckCircle2;
+              ? 'Unread Alert'
+              : 'Unread Notification';
+
+        const HeaderIcon = isMessage ? MessageSquare : Bell;
 
         return (
           <div
             key={item.id}
             role="status"
-            className={`pointer-events-auto flex w-full items-start gap-3 rounded-2xl border p-3.5 transition-all duration-200 ${containerClasses}`}
+            className={`pointer-events-auto w-full overflow-hidden rounded-2xl border bg-white shadow-2xl ${borderClass}`}
           >
-            <div
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconBoxClasses}`}
-            >
-              <Icon className="h-4 w-4" />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  className={`inline-flex items-center gap-1 text-xs font-bold ${
-                    isMessage
-                      ? 'text-[#176B52]'
-                      : isOffer
-                        ? 'text-[#B7740B]'
-                        : isError
-                          ? 'text-red-800'
-                          : 'text-white'
-                  }`}
-                >
-                  {item.title}
-                  {(isMessage || isOffer) && (
-                    <CheckCheck className="h-3.5 w-3.5 shrink-0 opacity-85" />
-                  )}
+            {/* Top Band with Message or Bell Icon + Mark Read */}
+            <div className={`flex items-center justify-between gap-2 px-3.5 py-2 ${headerBg}`}>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/15">
+                  <HeaderIcon
+                    className={`h-3.5 w-3.5 ${isOffer ? 'text-[#F4A62A]' : 'text-white'}`}
+                  />
                 </span>
-                <span
-                  className={`shrink-0 font-mono text-[10px] tabular-nums ${
-                    isMessage || isOffer
-                      ? 'text-[#172B3A]/45'
-                      : isError
-                        ? 'text-red-700/70'
-                        : 'text-white/60'
-                  }`}
-                >
-                  {item.timestamp}
+                <span className="truncate text-[11px] font-bold tracking-wide uppercase">
+                  {kindBadgeLabel}
                 </span>
               </div>
 
-              <p
-                className={`mt-1 break-words text-xs leading-relaxed ${
-                  isMessage || isOffer
-                    ? 'text-[#172B3A]/85'
-                    : isError
-                      ? 'text-red-900'
-                      : 'text-white/90'
-                }`}
-              >
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="font-mono text-[10px] tabular-nums opacity-85">
+                  {item.timestamp}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onMarkAsRead(item.id)}
+                  aria-label="Mark notification as read"
+                  className="inline-flex items-center gap-1 rounded-md bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white transition-colors hover:bg-white/25"
+                >
+                  <CheckCheck className="h-3 w-3" />
+                  <span>Mark read</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="space-y-2 px-3.5 py-3 text-[#172B3A]">
+              <div className="flex items-start justify-between gap-2">
+                <p className="min-w-0 break-words text-xs font-bold text-[#172B3A]">
+                  {item.title}
+                </p>
+              </div>
+              <p className="break-words text-xs leading-relaxed text-[#172B3A]/80">
                 {item.message}
               </p>
 
-              {item.onAction && item.actionLabel && (
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                {(item.onAction || item.actionTarget) && item.actionLabel ? (
+                  <button
+                    type="button"
+                    onClick={() => onExecuteAction(item)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold text-white transition-colors ${
+                      isMessage
+                        ? 'bg-[#176B52] hover:bg-[#125641]'
+                        : 'bg-[#172B3A] hover:bg-[#172B3A]/90'
+                    }`}
+                  >
+                    <HeaderIcon className="h-3 w-3" />
+                    <span>{item.actionLabel}</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </button>
+                ) : (
+                  <span className="text-[10px] font-medium text-[#172B3A]/50">
+                    Stays visible until marked as read
+                  </span>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => {
-                    item.onAction?.();
-                    onDismiss(item.id);
-                  }}
-                  className={`mt-2 inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                    isMessage
-                      ? 'bg-[#176B52] text-white hover:bg-[#125641]'
-                      : isOffer
-                        ? 'bg-[#172B3A] text-white hover:bg-[#172B3A]/90'
-                        : 'bg-white/15 text-white hover:bg-white/25'
-                  }`}
+                  onClick={() => onMarkAsRead(item.id)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-2.5 py-1 text-[11px] font-semibold text-[#172B3A] hover:bg-[#E8ECEA]"
                 >
-                  <span>{item.actionLabel}</span>
-                  <ArrowRight className="h-3 w-3" />
+                  <CheckCheck className="h-3 w-3 text-[#176B52]" />
+                  <span>Read &amp; Dismiss</span>
                 </button>
-              )}
+              </div>
             </div>
-
-            <button
-              type="button"
-              onClick={() => onDismiss(item.id)}
-              aria-label="Dismiss notification"
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
-                isMessage || isOffer
-                  ? 'text-[#172B3A]/45 hover:bg-[#F4F6F5] hover:text-[#172B3A]'
-                  : isError
-                    ? 'text-red-700/70 hover:bg-red-100'
-                    : 'text-white/65 hover:bg-white/10 hover:text-white'
-              }`}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
           </div>
         );
       })}
