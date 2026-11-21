@@ -14,7 +14,12 @@ import {
   ShieldCheck,
   Truck,
 } from 'lucide-react';
-import type { DeliveryRecord, KnownLocationRecord, PlatformPolicy } from '../types/nearestyou.ts';
+import type {
+  DeliveryRecord,
+  KnownLocationRecord,
+  PaymentInitTarget,
+  PlatformPolicy,
+} from '../types/nearestyou.ts';
 import { ADDIS_SUB_CITIES, formatEtb } from '../utils/geo.ts';
 import { TRANSLATIONS, type AppLanguage } from '../utils/i18n.ts';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -29,6 +34,7 @@ interface DeliveryTransportViewProps {
   knownLocations?: KnownLocationRecord[];
   language: AppLanguage;
   onNotify: (msg: string) => void;
+  onOpenPayment?: (target: PaymentInitTarget) => void;
 }
 
 const CONFLICT_CATEGORIES = [
@@ -44,6 +50,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
   knownLocations: propKnownLocations,
   language,
   onNotify,
+  onOpenPayment,
 }) => {
   const t = TRANSLATIONS[language].delivery;
   const { firebaseUser, dbUser, isAdmin, hasRole, openAuthModal, authFetch } = useAuth();
@@ -102,7 +109,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
     'MOTORCYCLE'
   );
   const [urgency, setUrgency] = useState<'STANDARD' | 'EXPRESS'>('STANDARD');
-  const [paymentMethod, setPaymentMethod] = useState<'TELEBIRR' | 'CBE_BIRR' | 'CASH'>('TELEBIRR');
+  const [paymentMethod, setPaymentMethod] = useState<'CHAPA' | 'PAYO' | 'TELEBIRR' | 'CBE_BIRR' | 'CASH'>('CHAPA');
   const [submitting, setSubmitting] = useState(false);
 
   const isVerifiedPartner =
@@ -371,6 +378,16 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
       onNotify(
         `${data.trackingCode} dispatched (${formatEtb(data.totalFee)}). Pickup OTP: ${data.pickupOtp} · Receiver OTP: ${data.deliveryOtp}`
       );
+      if ((paymentMethod === 'CHAPA' || paymentMethod === 'PAYO') && data?.id) {
+        onOpenPayment?.({
+          gateway: paymentMethod,
+          transactionType: requestType === 'RIDE' ? 'RIDE' : 'DELIVERY',
+          referenceId: Number(data.id),
+          referenceCode: String(data.trackingCode),
+          title: `${requestType === 'RIDE' ? 'Ride' : 'Delivery'} Dispatch ${data.trackingCode}`,
+          amountEtb: Number(data.totalFee),
+        });
+      }
       setDetails('');
       await loadQueue();
     } catch (err: unknown) {
@@ -709,19 +726,25 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                    {(['TELEBIRR', 'CBE_BIRR', 'CASH'] as const).map((pm) => (
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5 sm:gap-2">
+                    {([
+                      { id: 'CHAPA', label: 'Chapa' },
+                      { id: 'PAYO', label: 'Payo' },
+                      { id: 'TELEBIRR', label: 'Telebirr' },
+                      { id: 'CBE_BIRR', label: 'CBE Birr' },
+                      { id: 'CASH', label: 'Cash' },
+                    ] as const).map((pm) => (
                       <button
-                        key={pm}
+                        key={pm.id}
                         type="button"
-                        onClick={() => setPaymentMethod(pm)}
+                        onClick={() => setPaymentMethod(pm.id)}
                         className={`min-h-[44px] min-w-0 truncate rounded-lg border px-1.5 py-2 text-center text-xs font-semibold sm:px-2 ${
-                          paymentMethod === pm
+                          paymentMethod === pm.id
                             ? 'border-[#176B52] bg-[#176B52]/10 text-[#176B52]'
                             : 'border-[#172B3A]/15 bg-white text-[#172B3A]/75'
                         }`}
                       >
-                        {pm === 'CBE_BIRR' ? 'CBE Birr' : pm === 'TELEBIRR' ? 'Telebirr' : 'Cash'}
+                        {pm.label}
                       </button>
                     ))}
                   </div>
@@ -841,22 +864,44 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                         </span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTrackCodeInput(d.trackingCode);
-                        setTrackPhoneInput(d.receiverPhone || '');
-                        setActiveTrackQuery({
-                          code: d.trackingCode,
-                          phone: d.receiverPhone || '',
-                        });
-                        setMode('TRACK');
-                      }}
-                      className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-white px-3 py-1.5 text-xs font-semibold text-[#176B52] hover:bg-emerald-50"
-                    >
-                      <Radio className="h-3.5 w-3.5 shrink-0" />
-                      <span>{t.tabTrackLive}</span>
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      {d.escrowStatus === 'AWAITING_PAYMENT' &&
+                        (d.paymentMethod === 'CHAPA' || d.paymentMethod === 'PAYO') &&
+                        onOpenPayment && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenPayment({
+                                gateway: d.paymentMethod as 'CHAPA' | 'PAYO',
+                                transactionType: d.requestType === 'RIDE' ? 'RIDE' : 'DELIVERY',
+                                referenceId: d.id,
+                                referenceCode: d.trackingCode,
+                                title: `${d.requestType === 'RIDE' ? 'Ride' : 'Delivery'} ${d.trackingCode}`,
+                                amountEtb: Number(d.totalFee),
+                              })
+                            }
+                            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#176B52] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#125641]"
+                          >
+                            Complete {d.paymentMethod} Payment ({formatEtb(d.totalFee)})
+                          </button>
+                        )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTrackCodeInput(d.trackingCode);
+                          setTrackPhoneInput(d.receiverPhone || '');
+                          setActiveTrackQuery({
+                            code: d.trackingCode,
+                            phone: d.receiverPhone || '',
+                          });
+                          setMode('TRACK');
+                        }}
+                        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-white px-3 py-1.5 text-xs font-semibold text-[#176B52] hover:bg-emerald-50"
+                      >
+                        <Radio className="h-3.5 w-3.5 shrink-0" />
+                        <span>{t.tabTrackLive}</span>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1053,6 +1098,31 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                 <MapPin className="h-3.5 w-3.5 shrink-0 text-[#176B52]" />
                 <span className="break-all sm:break-normal">{gpsStatusText}</span>
               </div>
+              {firebaseUser && (
+                <p className="text-[11px] text-[#172B3A]/70">
+                  Your Earnings Account:{' '}
+                  {dbUser?.payoutAccountNumber ||
+                  dbUser?.payoutTelebirrNumber ||
+                  dbUser?.payoAccountHandle ? (
+                    <span className="font-mono font-semibold text-[#176B52]">
+                      {[
+                        dbUser.payoutBankName && dbUser.payoutAccountNumber
+                          ? `${dbUser.payoutBankName} (${dbUser.payoutAccountNumber})`
+                          : null,
+                        dbUser.payoutTelebirrNumber ? `Telebirr ${dbUser.payoutTelebirrNumber}` : null,
+                        dbUser.payoAccountHandle ? `Payo ${dbUser.payoAccountHandle}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  ) : (
+                    <span className="text-amber-800">
+                      Not configured yet — open Account Profile → Payout Account to receive Chapa &amp;
+                      Payo settlements directly.
+                    </span>
+                  )}
+                </p>
+              )}
             </div>
 
             <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center lg:w-auto">

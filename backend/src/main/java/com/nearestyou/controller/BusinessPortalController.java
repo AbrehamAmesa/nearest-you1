@@ -3,12 +3,14 @@ package com.nearestyou.controller;
 import com.nearestyou.dto.NearestYouDtos.CreateBusinessRequest;
 import com.nearestyou.dto.NearestYouDtos.CreateListingRequest;
 import com.nearestyou.dto.NearestYouDtos.JobSeekerAdvertiseRequest;
+import com.nearestyou.dto.NearestYouDtos.PayoutAccountRequest;
 import com.nearestyou.dto.NearestYouDtos.UpdateAvailabilityRequest;
 import com.nearestyou.dto.NearestYouDtos.UpdateListingRequest;
 import com.nearestyou.entity.Business;
 import com.nearestyou.entity.ServiceListing;
 import com.nearestyou.security.UserPrincipal;
 import com.nearestyou.service.BusinessAndListingService;
+import com.nearestyou.service.PaymentGatewayService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -21,9 +23,14 @@ import java.util.Map;
 public class BusinessPortalController {
 
     private final BusinessAndListingService businessAndListingService;
+    private final PaymentGatewayService paymentGatewayService;
 
-    public BusinessPortalController(BusinessAndListingService businessAndListingService) {
+    public BusinessPortalController(
+            BusinessAndListingService businessAndListingService,
+            PaymentGatewayService paymentGatewayService
+    ) {
         this.businessAndListingService = businessAndListingService;
+        this.paymentGatewayService = paymentGatewayService;
     }
 
     @GetMapping("/business/portal")
@@ -38,6 +45,15 @@ public class BusinessPortalController {
             @Valid @RequestBody CreateBusinessRequest req
     ) {
         return businessAndListingService.createBusiness(principal, req);
+    }
+
+    @PutMapping("/businesses/{id}/payout-account")
+    public Business updateBusinessPayoutAccount(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @RequestBody PayoutAccountRequest req
+    ) {
+        return paymentGatewayService.updateBusinessPayoutAccount(principal, id, req);
     }
 
     @PostMapping("/listings")

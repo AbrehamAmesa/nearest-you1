@@ -184,6 +184,14 @@ export interface Business {
   tinNumber?: string | null;
   profileType?: 'BUSINESS' | 'INDIVIDUAL_JOB_SEEKER' | string | null;
   isFeatured: boolean;
+  payoutBankCode?: string | null;
+  payoutBankName?: string | null;
+  payoutAccountNumber?: string | null;
+  payoutAccountName?: string | null;
+  payoutTelebirrNumber?: string | null;
+  payoAccountHandle?: string | null;
+  chapaSubaccountId?: string | null;
+  preferredPayoutGateway?: 'CHAPA' | 'PAYO' | 'BOTH' | string | null;
   createdAt: string;
 }
 
@@ -403,6 +411,13 @@ export interface CommissionRecord {
   taxPeriod?: string | null;
   currency: string;
   paymentMethod: string;
+  gateway?: string | null;
+  gatewayTxRef?: string | null;
+  platformCommissionAccount?: string | null;
+  providerPayoutAccount?: string | null;
+  chapaSubaccountId?: string | null;
+  commissionSettlementStatus?: string | null;
+  providerSettlementStatus?: string | null;
   status: string;
   createdAt: string;
 }
@@ -422,6 +437,8 @@ export interface GovernmentTaxReport {
     totalProviderNetEtb: number;
     digitalGrossEtb: number;
     cashGrossEtb: number;
+    chapaGrossEtb?: number;
+    payoGrossEtb?: number;
     digitalComplianceRatePercent: number;
     escrowHeldTotalEtb: number;
     activeDisputeCount: number;
@@ -457,6 +474,13 @@ export interface GovernmentTaxReport {
     commissionAmount: number;
     providerAmount: number;
     paymentMethod: string;
+    gateway?: string | null;
+    gatewayTxRef?: string | null;
+    platformCommissionAccount?: string | null;
+    providerPayoutAccount?: string | null;
+    chapaSubaccountId?: string | null;
+    commissionSettlementStatus?: string | null;
+    providerSettlementStatus?: string | null;
     status: string;
     createdAt: string;
   }>;
@@ -494,6 +518,14 @@ export interface DbUserRecord {
   accountStatus: string;
   lastSeenAt?: string | null;
   isActiveLastMinute?: boolean;
+  payoutBankCode?: string | null;
+  payoutBankName?: string | null;
+  payoutAccountNumber?: string | null;
+  payoutAccountName?: string | null;
+  payoutTelebirrNumber?: string | null;
+  payoAccountHandle?: string | null;
+  chapaSubaccountId?: string | null;
+  preferredPayoutGateway?: 'CHAPA' | 'PAYO' | 'BOTH' | string | null;
   createdAt: string;
 }
 
@@ -624,3 +656,88 @@ export interface KnownLocationRecord {
   createdAt?: string;
 }
 
+export interface BankDirectoryItem {
+  code: string;
+  name: string;
+  currency: string;
+}
+
+export interface PlatformCommissionAccountConfig {
+  accountHolderName: string;
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  telebirrNumber?: string;
+  chapaSettlementLabel?: string;
+  payoAccountHandle?: string;
+  chapaEnabled: boolean;
+  payoEnabled: boolean;
+}
+
+export interface PaymentGatewayConfig {
+  platformCommissionAccount: PlatformCommissionAccountConfig;
+  banks: BankDirectoryItem[];
+  gateways: {
+    chapa: { enabled: boolean; mode: 'LIVE' | 'SANDBOX' | string };
+    payo: { enabled: boolean; mode: 'LIVE' | 'SANDBOX' | string };
+  };
+}
+
+export interface AccountSnapshot {
+  ownerType?: string;
+  ownerLabel?: string;
+  accountHolderName?: string;
+  bankCode?: string | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  accountName?: string | null;
+  telebirrNumber?: string | null;
+  payoAccountHandle?: string | null;
+  chapaSettlementLabel?: string | null;
+  chapaSubaccountId?: string | null;
+  preferredPayoutGateway?: string | null;
+  isConfigured?: boolean;
+  summaryLabel?: string;
+}
+
+export interface PaymentTransactionRecord {
+  id: number;
+  txRef: string;
+  gateway: 'CHAPA' | 'PAYO' | string;
+  gatewayMode: 'LIVE' | 'SANDBOX' | string;
+  transactionType: 'ORDER' | 'BOOKING' | 'DELIVERY' | 'RIDE' | string;
+  referenceId: number;
+  referenceCode: string;
+  customerUid: string;
+  customerEmail?: string | null;
+  customerName?: string | null;
+  providerUid?: string | null;
+  businessId?: number | null;
+  currency: string;
+  grossAmount: string | number;
+  commissionAmount: string | number;
+  providerAmount: string | number;
+  taxAmount: string | number;
+  platformCommissionAccountSnapshot?: AccountSnapshot | null;
+  providerPayoutAccountSnapshot?: AccountSnapshot | null;
+  chapaSubaccountId?: string | null;
+  gatewayCheckoutUrl?: string | null;
+  gatewayTransactionId?: string | null;
+  payerReceiptReference?: string | null;
+  payerReceiptImageUrl?: string | null;
+  commissionLegStatus: string;
+  providerLegStatus: string;
+  status: string;
+  paidAt?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PaymentInitTarget {
+  gateway: 'CHAPA' | 'PAYO';
+  transactionType: 'ORDER' | 'BOOKING' | 'DELIVERY' | 'RIDE';
+  referenceId: number;
+  referenceCode: string;
+  title: string;
+  amountEtb: number;
+}

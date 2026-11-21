@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Briefcase,
+  CreditCard,
   Lock,
   MessageSquare,
   MessageSquareWarning,
@@ -19,11 +20,13 @@ import type {
   JobApplicationRecord,
   Listing,
   OrderRecord,
+  PaymentInitTarget,
+  PaymentTransactionRecord,
 } from '../types/nearestyou.ts';
 import { formatEtb } from '../utils/geo.ts';
 import { TRANSLATIONS, type AppLanguage } from '../utils/i18n.ts';
 import { formatEtaClock, formatLastSeenStatus } from '../utils/presence.ts';
-import { businessApi, engagementApi, jobSeekerApi } from '../api/index.ts';
+import { businessApi, engagementApi, jobSeekerApi, paymentApi } from '../api/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useLiveChatInboxListener } from '../hooks/useLiveChat.ts';
 import { ContractOfferSection } from './ContractOfferSection.tsx';
@@ -50,6 +53,8 @@ interface CustomerActivityViewProps {
   onRefreshCatalog: () => void;
   onOpenJobSeekerAdvertise?: () => void;
   onEditAd?: (ad: Listing) => void;
+  onOpenPayment?: (target: PaymentInitTarget) => void;
+  paymentRefreshSignal?: number;
 }
 
 export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
@@ -63,6 +68,8 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   onRefreshCatalog,
   onOpenJobSeekerAdvertise,
   onEditAd,
+  onOpenPayment,
+  paymentRefreshSignal = 0,
 }) => {
   const t = TRANSLATIONS[language].activity;
   const { dbUser, firebaseUser, openAuthModal, authFetch } = useAuth();
@@ -73,6 +80,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
   const [applications, setApplications] = useState<JobApplicationRecord[]>([]);
   const [myJobSeekerAds, setMyJobSeekerAds] = useState<Listing[]>([]);
+  const [myPayments, setMyPayments] = useState<PaymentTransactionRecord[]>([]);
   const [favIds, setFavIds] = useState<number[]>([]);
   const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(
@@ -150,10 +158,11 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
     if (!firebaseUser) return;
     setLoading(true);
     try {
-      const [workspaceResult, seekerResult, threadsResult] = await Promise.allSettled([
+      const [workspaceResult, seekerResult, threadsResult, paymentsResult] = await Promise.allSettled([
         authFetch('/api/v1/me/workspace'),
         jobSeekerApi.getMine(),
         engagementApi.getChatThreads(),
+        paymentApi.getMine(),
       ]);
       if (workspaceResult.status === 'fulfilled' && workspaceResult.value.ok) {
         const data = await workspaceResult.value.json();
@@ -173,6 +182,9 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
         setThreads(nextThreads);
         setSelectedThreadKey((prev) => prev || nextThreads[0]?.threadKey || null);
       }
+      if (paymentsResult.status === 'fulfilled') {
+        setMyPayments(Array.isArray(paymentsResult.value.data) ? paymentsResult.value.data : []);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -184,7 +196,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
 
   useEffect(() => {
     if (firebaseUser) loadWorkspace();
-  }, [firebaseUser]);
+  }, [firebaseUser, paymentRefreshSignal]);
 
   useEffect(() => {
     if (navSignal <= 0) return;
@@ -452,12 +464,26 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                         ))}
                         <div className="flex flex-wrap justify-between gap-2 pt-2 text-[#172B3A]/60">
                           <span>
-                            Payment: {ord.paymentMethod} · {ord.fulfillmentType} ({ord.deliveryAddress})
+                            Payment: {ord.paymentMethod} ({ord.paymentStatus}) · {ord.fulfillmentType} (
+                            {ord.deliveryAddress})
                           </span>
                           <span className="font-mono tabular-nums">
                             Delivery {formatEtb(ord.deliveryFee)} + VAT {formatEtb(ord.taxAmount)}
                           </span>
                         </div>
+                        {(() => {
+                          const ptx = myPayments.find(
+                            (p) => p.transactionType === 'ORDER' && p.referenceId === ord.id && p.status === 'PAID'
+                          );
+                          if (!ptx) return null;
+                          return (
+                            <p className="font-mono text-[11px] text-[#176B52]">
+                              Split Paid via {ptx.gateway} ({ptx.txRef}) · Provider Net:{' '}
+                              {formatEtb(Number(ptx.providerAmount))} · Platform Commission:{' '}
+                              {formatEtb(Number(ptx.commissionAmount))}
+                            </p>
+                          );
+                        })()}
                       </div>
 
                       {/* Order Acceptance & Approximate Ready / Delivery Time */}
@@ -511,6 +537,27 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                       </div>
 
                       <div className="mt-4 flex flex-wrap justify-end gap-2">
+                        {(ord.paymentMethod === 'CHAPA' || ord.paymentMethod === 'PAYO') &&
+                          ord.paymentStatus === 'PENDING_PAYMENT' &&
+                          onOpenPayment && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenPayment({
+                                  gateway: ord.paymentMethod as 'CHAPA' | 'PAYO',
+                                  transactionType: 'ORDER',
+                                  referenceId: ord.id,
+                                  referenceCode: ord.orderNumber,
+                                  title: `Order ${ord.orderNumber} (${biz?.businessName || 'Vendor'})`,
+                                  amountEtb: Number(ord.totalAmount),
+                                })
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-[#172B3A] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#176B52]"
+                            >
+                              <CreditCard className="h-3.5 w-3.5" />
+                              Complete {ord.paymentMethod} Payment
+                            </button>
+                          )}
                         {canCancel && (
                           <button
                             type="button"
@@ -604,7 +651,10 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                       <div className="mt-3 space-y-1 text-xs text-[#172B3A]/75">
                         <p>
                           Provider: {biz?.businessName} · Date: {b.scheduledDate}
-                          {b.endDate ? ` to ${b.endDate}` : ` at ${b.scheduledTime}`}
+                          {b.endDate ? ` to ${b.endDate}` : ` at ${b.scheduledTime}`} · Payment:{' '}
+                          <span className="font-mono font-semibold">
+                            {b.paymentMethod} ({b.paymentStatus})
+                          </span>
                         </p>
                         {b.priceBreakdown.map((p, idx) => (
                           <div key={idx} className="flex justify-between">
@@ -615,6 +665,27 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                       </div>
 
                       <div className="mt-4 flex flex-wrap justify-end gap-2">
+                        {(b.paymentMethod === 'CHAPA' || b.paymentMethod === 'PAYO') &&
+                          b.paymentStatus === 'PENDING_PAYMENT' &&
+                          onOpenPayment && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenPayment({
+                                  gateway: b.paymentMethod as 'CHAPA' | 'PAYO',
+                                  transactionType: 'BOOKING',
+                                  referenceId: b.id,
+                                  referenceCode: b.bookingReference,
+                                  title: `${listing?.title || b.bookingType} (${b.bookingReference})`,
+                                  amountEtb: Number(b.quotedPrice || b.agreedPrice),
+                                })
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-[#172B3A] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#176B52]"
+                            >
+                              <CreditCard className="h-3.5 w-3.5" />
+                              Complete {b.paymentMethod} Payment
+                            </button>
+                          )}
                         <button
                           type="button"
                           onClick={() =>
@@ -784,6 +855,27 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                     )}
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
+                      {d.escrowStatus === 'AWAITING_PAYMENT' &&
+                        (d.paymentMethod === 'CHAPA' || d.paymentMethod === 'PAYO') &&
+                        onOpenPayment && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenPayment({
+                                gateway: d.paymentMethod as 'CHAPA' | 'PAYO',
+                                transactionType: d.requestType === 'RIDE' ? 'RIDE' : 'DELIVERY',
+                                referenceId: d.id,
+                                referenceCode: d.trackingCode,
+                                title: `${d.requestType === 'RIDE' ? 'Ride' : 'Delivery'} ${d.trackingCode}`,
+                                amountEtb: Number(d.totalFee),
+                              })
+                            }
+                            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-[#172B3A] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#176B52]"
+                          >
+                            <CreditCard className="h-3.5 w-3.5" />
+                            Complete {d.paymentMethod} Payment
+                          </button>
+                        )}
                       {d.status !== 'CANCELLED' && (
                         <button
                           type="button"

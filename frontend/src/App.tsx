@@ -12,11 +12,13 @@ import { ListingDetailModal } from './components/ListingDetailModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { AccountProfileModal } from './components/AccountProfileModal.tsx';
 import { JobSeekerAdvertiseModal } from './components/JobSeekerAdvertiseModal.tsx';
+import { PaymentGatewayModal } from './components/PaymentGatewayModal.tsx';
 import type { AppNotification, NotificationKind } from './components/NotificationCenter.tsx';
 import { useLiveChatInboxListener } from './hooks/useLiveChat.ts';
 import type { AppLanguage } from './utils/i18n.ts';
-import { catalogApi, engagementApi, mapsApi, userApi } from './api/index.ts';
+import { catalogApi, engagementApi, mapsApi, paymentApi, userApi } from './api/index.ts';
 import type {
+  BookingRecord,
   Business,
   CartItem,
   Category,
@@ -27,6 +29,7 @@ import type {
   LiveProviderPublicMarker,
   OnboardingGovernance,
   OrderRecord,
+  PaymentInitTarget,
   PlatformPolicy,
   RecommendedListingItem,
   ReviewItem,
@@ -196,6 +199,8 @@ function NearestYouWorkspace() {
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [listingInitialEditMode, setListingInitialEditMode] = useState(false);
   const [notificationsInboxOpen, setNotificationsInboxOpen] = useState(false);
+  const [paymentTargets, setPaymentTargets] = useState<PaymentInitTarget[]>([]);
+  const [paymentRefreshSignal, setPaymentRefreshSignal] = useState(0);
 
   const notificationStorageKey = `ny_notifications_v2_${dbUser?.uid || 'guest'}`;
   const dismissedStorageKey = `ny_dismissed_notif_ids_${dbUser?.uid || 'guest'}`;
@@ -711,6 +716,34 @@ function NearestYouWorkspace() {
   }, [firebaseUser, dbUser?.uid]);
 
   useEffect(() => {
+    if (!firebaseUser || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const txRef = params.get('paymentTxRef') || params.get('trx_ref');
+    if (!txRef) return;
+    params.delete('paymentTxRef');
+    params.delete('trx_ref');
+    const cleanSearch = params.toString();
+    const cleanUrl = `${window.location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}${window.location.hash}`;
+    window.history.replaceState({}, '', cleanUrl);
+    paymentApi
+      .verify(txRef)
+      .then((res) => {
+        const tx = res.data;
+        pushNotification({
+          eventId: `payment:${tx.txRef}:${tx.status}`,
+          kind: 'offer',
+          title: `Payment ${tx.status} · ${tx.gateway}`,
+          message: `${tx.referenceCode} settled (${Number(tx.grossAmount).toLocaleString()} ETB).`,
+          actionLabel: 'View Activity',
+          actionTarget: 'activity',
+          targetTab: tx.transactionType === 'BOOKING' ? 'BOOKINGS' : tx.transactionType === 'ORDER' ? 'ORDERS' : 'DELIVERIES',
+        });
+        setPaymentRefreshSignal((n) => n + 1);
+      })
+      .catch(() => {});
+  }, [firebaseUser, pushNotification]);
+
+  useEffect(() => {
     if (!firebaseUser || !dbUser?.uid) return;
     let cancelled = false;
     engagementApi
@@ -1058,6 +1091,7 @@ function NearestYouWorkspace() {
             knownLocations={knownLocations}
             language={language}
             onNotify={notify}
+            onOpenPayment={(target) => setPaymentTargets([target])}
           />
         )}
 
@@ -1076,6 +1110,8 @@ function NearestYouWorkspace() {
               setListingInitialEditMode(true);
               setSelectedListing(ad);
             }}
+            onOpenPayment={(target) => setPaymentTargets([target])}
+            paymentRefreshSignal={paymentRefreshSignal}
           />
         )}
 
@@ -1144,6 +1180,23 @@ function NearestYouWorkspace() {
               threadKey: `order:${order.id}`,
             });
           });
+          const pendingGatewayTargets: PaymentInitTarget[] = createdOrders
+            .filter(
+              (o) =>
+                (o.paymentMethod === 'CHAPA' || o.paymentMethod === 'PAYO') &&
+                o.paymentStatus === 'PENDING_PAYMENT'
+            )
+            .map((o) => ({
+              gateway: o.paymentMethod as 'CHAPA' | 'PAYO',
+              transactionType: 'ORDER',
+              referenceId: o.id,
+              referenceCode: o.orderNumber,
+              title: `Order ${o.orderNumber} (${businessMap.get(o.businessId)?.businessName || 'Vendor'})`,
+              amountEtb: Number(o.totalAmount),
+            }));
+          if (pendingGatewayTargets.length > 0) {
+            setPaymentTargets(pendingGatewayTargets);
+          }
           setActivityNav((prev) => ({
             tab: 'ORDERS',
             threadKey: null,
@@ -1218,6 +1271,20 @@ function NearestYouWorkspace() {
           setListings((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
           loadCatalog();
         }}
+        onBookingCreated={(booking: BookingRecord) => {
+          if (booking.paymentMethod === 'CHAPA' || booking.paymentMethod === 'PAYO') {
+            setPaymentTargets([
+              {
+                gateway: booking.paymentMethod,
+                transactionType: 'BOOKING',
+                referenceId: booking.id,
+                referenceCode: booking.bookingReference,
+                title: `Service Booking ${booking.bookingReference}`,
+                amountEtb: Number(booking.quotedPrice || booking.agreedPrice),
+              },
+            ]);
+          }
+        }}
       />
 
       <AuthModal
@@ -1253,6 +1320,30 @@ function NearestYouWorkspace() {
           setListingInitialEditMode(true);
           setSelectedListing(ad);
         }}
+      />
+
+      <PaymentGatewayModal
+        targets={paymentTargets}
+        onClose={() => setPaymentTargets([])}
+        onPaymentSettled={(tx) => {
+          setPaymentRefreshSignal((n) => n + 1);
+          pushNotification({
+            eventId: `payment-settled:${tx.txRef}`,
+            kind: 'offer',
+            title: `Payment Verified · ${tx.gateway}`,
+            message: `${tx.referenceCode} paid (${Number(tx.grossAmount).toLocaleString()} ETB). Provider sales routed & platform commission collected.`,
+            actionLabel: 'View Activity',
+            actionTarget: 'activity',
+            targetTab:
+              tx.transactionType === 'BOOKING'
+                ? 'BOOKINGS'
+                : tx.transactionType === 'ORDER'
+                  ? 'ORDERS'
+                  : 'DELIVERIES',
+          });
+          loadCatalog();
+        }}
+        onNotify={notify}
       />
     </div>
   );

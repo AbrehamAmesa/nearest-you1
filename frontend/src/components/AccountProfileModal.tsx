@@ -3,6 +3,7 @@ import {
   Camera,
   CheckCircle2,
   KeyRound,
+  Landmark,
   Lock,
   LogOut,
   MapPin,
@@ -11,6 +12,8 @@ import {
   User as UserIcon,
   X,
 } from 'lucide-react';
+import { paymentApi, userApi } from '../api/index.ts';
+import type { BankDirectoryItem } from '../types/nearestyou.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { ADDIS_SUB_CITIES } from '../utils/geo.ts';
 import type { AppLanguage } from '../utils/i18n.ts';
@@ -76,15 +79,26 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
     updateAccountPassword,
     linkEmailPassword,
     sendPasswordReset,
+    refreshProfile,
     logout,
   } = useAuth();
 
-  const [tab, setTab] = useState<'PROFILE' | 'SECURITY' | 'ROLES'>('PROFILE');
+  const [tab, setTab] = useState<'PROFILE' | 'PAYOUT' | 'SECURITY' | 'ROLES'>('PROFILE');
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [defaultSubCity, setDefaultSubCity] = useState(selectedSubCity);
   const [preferredLanguage, setPreferredLanguage] = useState<AppLanguage>(language);
   const [profilePhotoUrl, setProfilePhotoUrl] = useState('');
+
+  // Personal payout account state (drivers & independent service givers)
+  const [banks, setBanks] = useState<BankDirectoryItem[]>([]);
+  const [payoutBankCode, setPayoutBankCode] = useState('130');
+  const [payoutBankName, setPayoutBankName] = useState('Commercial Bank of Ethiopia (CBE)');
+  const [payoutAccountNumber, setPayoutAccountNumber] = useState('');
+  const [payoutAccountName, setPayoutAccountName] = useState('');
+  const [payoutTelebirrNumber, setPayoutTelebirrNumber] = useState('');
+  const [payoAccountHandle, setPayoAccountHandle] = useState('');
+  const [preferredPayoutGateway, setPreferredPayoutGateway] = useState<'BOTH' | 'CHAPA' | 'PAYO'>('BOTH');
 
   // Security tab state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -104,11 +118,27 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
       dbLang === 'am' || dbLang === 'om' || dbLang === 'en' ? dbLang : language
     );
     setProfilePhotoUrl(dbUser?.profilePhotoUrl || firebaseUser.photoURL || '');
+    setPayoutBankCode(dbUser?.payoutBankCode || '130');
+    setPayoutBankName(dbUser?.payoutBankName || 'Commercial Bank of Ethiopia (CBE)');
+    setPayoutAccountNumber(dbUser?.payoutAccountNumber || '');
+    setPayoutAccountName(dbUser?.payoutAccountName || dbUser?.fullName || '');
+    setPayoutTelebirrNumber(dbUser?.payoutTelebirrNumber || dbUser?.phoneNumber || '');
+    setPayoAccountHandle(dbUser?.payoAccountHandle || '');
+    const prefGw = dbUser?.preferredPayoutGateway;
+    setPreferredPayoutGateway(
+      prefGw === 'CHAPA' || prefGw === 'PAYO' ? prefGw : 'BOTH'
+    );
     setCurrentPassword('');
     setNewPassword('');
     setConfirmNewPassword('');
     setLocalMsg(null);
     clearAuthError();
+    paymentApi
+      .getBanks()
+      .then((res) => {
+        if (Array.isArray(res.data)) setBanks(res.data);
+      })
+      .catch(() => {});
   }, [open, firebaseUser, dbUser]);
 
   useEffect(() => {
@@ -218,6 +248,47 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
     }
   };
 
+  const handleSavePayoutAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLocalMsg(null);
+    if (!payoutAccountNumber.trim() && !payoutTelebirrNumber.trim() && !payoAccountHandle.trim()) {
+      setLocalMsg({
+        type: 'err',
+        text: 'Enter at least one payout account (Bank Account, Telebirr, or Payo handle).',
+      });
+      return;
+    }
+    setSaving(true);
+    try {
+      const matchedBank = banks.find((b) => b.code === payoutBankCode);
+      const res = await userApi.updatePayoutAccount({
+        payoutBankCode,
+        payoutBankName: matchedBank?.name || payoutBankName,
+        payoutAccountNumber: payoutAccountNumber.trim(),
+        payoutAccountName: payoutAccountName.trim() || fullName.trim(),
+        payoutTelebirrNumber: payoutTelebirrNumber.trim(),
+        payoAccountHandle: payoAccountHandle.trim(),
+        preferredPayoutGateway,
+      });
+      await refreshProfile();
+      const subId = res.data?.chapaSubaccountId;
+      setLocalMsg({
+        type: 'ok',
+        text: subId
+          ? `Own payout account saved & Chapa subaccount (${subId}) provisioned.`
+          : 'Own payout account saved for direct sales settlement.',
+      });
+      onNotify('Personal sales payout account saved.');
+    } catch (err: any) {
+      setLocalMsg({
+        type: 'err',
+        text: err?.response?.data?.error || 'Could not save payout account.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const displayInitial = (fullName || firebaseUser.email || 'U').charAt(0).toUpperCase();
 
   return (
@@ -268,9 +339,10 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
         </div>
 
         {/* Navigation Tabs */}
-        <div className="grid grid-cols-3 gap-1 rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5] p-1 text-xs">
+        <div className="grid grid-cols-4 gap-1 rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5] p-1 text-[11px] sm:text-xs">
           {[
             { id: 'PROFILE', label: 'Edit Profile' },
+            { id: 'PAYOUT', label: 'Payout Account' },
             { id: 'SECURITY', label: 'Security' },
             { id: 'ROLES', label: 'Roles & KYC' },
           ].map((item) => (
@@ -281,7 +353,7 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
                 setTab(item.id as typeof tab);
                 setLocalMsg(null);
               }}
-              className={`min-h-[36px] rounded-lg font-semibold transition-colors ${
+              className={`min-h-[36px] rounded-lg px-1 font-semibold transition-colors ${
                 tab === item.id
                   ? 'bg-white text-[#176B52] shadow-sm'
                   : 'text-[#172B3A]/65 hover:text-[#172B3A]'
@@ -409,6 +481,123 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
               className="w-full min-h-[42px] rounded-lg bg-[#176B52] px-4 py-2 text-xs font-semibold text-white hover:bg-[#125641] disabled:opacity-60"
             >
               {saving ? 'Saving Profile...' : 'Save Profile Changes'}
+            </button>
+          </form>
+        )}
+
+        {/* TAB 1B: Personal Payout Collection Account (Drivers & Individual Service Givers) */}
+        {tab === 'PAYOUT' && (
+          <form onSubmit={handleSavePayoutAccount} className="space-y-3.5 text-xs">
+            <div className="rounded-xl border border-[#176B52]/20 bg-emerald-50/40 p-3 space-y-1">
+              <p className="flex items-center gap-1.5 font-semibold text-[#176B52]">
+                <Landmark className="h-3.5 w-3.5" />
+                Your Own Sales &amp; Earnings Collection Account
+              </p>
+              <p className="text-[11px] text-[#172B3A]/75">
+                Net proceeds from your deliveries, rides, or individual services settle directly into
+                this account while platform commission goes to the platform account.
+              </p>
+              {dbUser?.chapaSubaccountId && (
+                <p className="font-mono text-[11px] font-semibold text-[#176B52]">
+                  Chapa Subaccount ID: {dbUser.chapaSubaccountId}
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block font-medium text-[#172B3A]/75">Ethiopian Bank</label>
+                <select
+                  value={payoutBankCode}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    setPayoutBankCode(code);
+                    const b = banks.find((x) => x.code === code);
+                    if (b) setPayoutBankName(b.name);
+                  }}
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-2.5 text-xs"
+                >
+                  {(banks.length > 0
+                    ? banks
+                    : [
+                        { code: '130', name: 'Commercial Bank of Ethiopia (CBE)', currency: 'ETB' },
+                        { code: '855', name: 'Telebirr', currency: 'ETB' },
+                      ]
+                  ).map((b) => (
+                    <option key={b.code} value={b.code}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block font-medium text-[#172B3A]/75">Account Number</label>
+                <input
+                  type="text"
+                  value={payoutAccountNumber}
+                  onChange={(e) => setPayoutAccountNumber(e.target.value)}
+                  placeholder="e.g., 1000123456789"
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block font-medium text-[#172B3A]/75">Account Holder Name</label>
+                <input
+                  type="text"
+                  value={payoutAccountName}
+                  onChange={(e) => setPayoutAccountName(e.target.value)}
+                  placeholder="Registered bank account name"
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-[#172B3A]/75">Telebirr Number</label>
+                <input
+                  type="tel"
+                  value={payoutTelebirrNumber}
+                  onChange={(e) => setPayoutTelebirrNumber(e.target.value)}
+                  placeholder="+251 9..."
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block font-medium text-[#172B3A]/75">Payo Account / Handle</label>
+                <input
+                  type="text"
+                  value={payoAccountHandle}
+                  onChange={(e) => setPayoAccountHandle(e.target.value)}
+                  placeholder="@payo_handle or phone"
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-[#172B3A]/75">Preferred Gateway</label>
+                <select
+                  value={preferredPayoutGateway}
+                  onChange={(e) =>
+                    setPreferredPayoutGateway(e.target.value as 'BOTH' | 'CHAPA' | 'PAYO')
+                  }
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-2.5 text-xs font-semibold"
+                >
+                  <option value="BOTH">Both Chapa &amp; Payo</option>
+                  <option value="CHAPA">Chapa Split Pay</option>
+                  <option value="PAYO">Payo Direct</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full min-h-[42px] rounded-lg bg-[#176B52] px-4 py-2 text-xs font-semibold text-white hover:bg-[#125641] disabled:opacity-60"
+            >
+              {saving ? 'Saving & Provisioning Chapa Subaccount...' : 'Save Own Payout Account'}
             </button>
           </form>
         )}

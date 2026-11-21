@@ -17,7 +17,7 @@ import {
   Video,
   X,
 } from 'lucide-react';
-import type { Business, Listing, ListingMetadata, ReviewItem } from '../types/nearestyou.ts';
+import type { BookingRecord, Business, Listing, ListingMetadata, ReviewItem } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
 import { formatPricingModelLabel } from '../utils/i18n.ts';
 import {
@@ -58,6 +58,7 @@ interface ListingDetailModalProps {
     threadKey: string;
   }) => void;
   onListingUpdated?: (updated: Listing) => void;
+  onBookingCreated?: (booking: BookingRecord) => void;
 }
 
 export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
@@ -72,6 +73,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   onActionSuccess,
   onMessageDelivered,
   onListingUpdated,
+  onBookingCreated,
 }) => {
   const { firebaseUser, dbUser, openAuthModal, authFetch } = useAuth();
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -85,7 +87,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const [workers, setWorkers] = useState(2);
   const [areaSqm, setAreaSqm] = useState(35);
   const [units, setUnits] = useState(1);
-  const [paymentMethod, setPaymentMethod] = useState<'TELEBIRR' | 'CBE_BIRR' | 'CASH'>('TELEBIRR');
+  const [paymentMethod, setPaymentMethod] = useState<'CHAPA' | 'PAYO' | 'TELEBIRR' | 'CBE_BIRR' | 'CASH'>('CHAPA');
   const [notes, setNotes] = useState('');
 
   // Workforce application state
@@ -311,6 +313,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Request failed.');
+      onBookingCreated?.(data as BookingRecord);
       onActionSuccess(
         isServiceDelivering
           ? `Service request ${data.bookingReference} sent (${formatEtb(data.agreedPrice)}).`
@@ -1799,19 +1802,25 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                            {(['TELEBIRR', 'CBE_BIRR', 'CASH'] as const).map((pm) => (
+                          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5 sm:gap-2">
+                            {([
+                              { id: 'CHAPA', label: 'Chapa' },
+                              { id: 'PAYO', label: 'Payo' },
+                              { id: 'TELEBIRR', label: 'Telebirr' },
+                              { id: 'CBE_BIRR', label: 'CBE Birr' },
+                              { id: 'CASH', label: 'Cash' },
+                            ] as const).map((pm) => (
                               <button
-                                key={pm}
+                                key={pm.id}
                                 type="button"
-                                onClick={() => setPaymentMethod(pm)}
+                                onClick={() => setPaymentMethod(pm.id)}
                                 className={`min-h-[38px] min-w-0 truncate rounded-lg border px-2 py-1.5 text-xs font-semibold ${
-                                  paymentMethod === pm
+                                  paymentMethod === pm.id
                                     ? 'border-[#176B52] bg-[#176B52]/10 text-[#176B52]'
                                     : 'border-[#172B3A]/15 bg-white text-[#172B3A]/75'
                                 }`}
                               >
-                                {pm === 'CBE_BIRR' ? 'CBE Birr' : pm === 'TELEBIRR' ? 'Telebirr' : 'Cash'}
+                                {pm.label}
                               </button>
                             ))}
                           </div>

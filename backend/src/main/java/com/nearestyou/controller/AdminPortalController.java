@@ -4,6 +4,7 @@ import com.nearestyou.dto.NearestYouDtos.*;
 import com.nearestyou.entity.*;
 import com.nearestyou.security.UserPrincipal;
 import com.nearestyou.service.AdminGovernanceService;
+import com.nearestyou.service.PaymentGatewayService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,9 +19,14 @@ import java.util.Map;
 public class AdminPortalController {
 
     private final AdminGovernanceService adminGovernanceService;
+    private final PaymentGatewayService paymentGatewayService;
 
-    public AdminPortalController(AdminGovernanceService adminGovernanceService) {
+    public AdminPortalController(
+            AdminGovernanceService adminGovernanceService,
+            PaymentGatewayService paymentGatewayService
+    ) {
         this.adminGovernanceService = adminGovernanceService;
+        this.paymentGatewayService = paymentGatewayService;
     }
 
     @GetMapping("/portal")
@@ -165,6 +171,14 @@ public class AdminPortalController {
             @RequestBody Map<String, Object> gov
     ) {
         return adminGovernanceService.updateOnboardingGovernance(principal, gov);
+    }
+
+    @PutMapping("/commission-account")
+    public PlatformSetting updatePlatformCommissionAccount(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody PlatformCommissionAccountRequest req
+    ) {
+        return paymentGatewayService.updatePlatformCommissionAccount(principal, req);
     }
 
     @PostMapping("/users/{id}/status")

@@ -366,4 +366,43 @@ public final class NearestYouDtos {
         String nextPaymentSchedule,
         String deliverables
     ) {}
+
+    public record PayoutAccountRequest(
+        String bankCode,
+        String bankName,
+        String accountNumber,
+        String accountName,
+        String telebirrNumber,
+        String payoAccountHandle,
+        String preferredPayoutGateway
+    ) {}
+
+    public record PlatformCommissionAccountRequest(
+        @NotBlank String accountHolderName,
+        String bankCode,
+        String bankName,
+        String accountNumber,
+        String telebirrNumber,
+        String chapaSettlementLabel,
+        String payoAccountHandle,
+        Boolean chapaEnabled,
+        Boolean payoEnabled
+    ) {}
+
+    public record InitializePaymentRequest(
+        @NotBlank String gateway,
+        @NotBlank String transactionType,
+        @NotNull Long referenceId,
+        String returnUrl,
+        String customerEmail,
+        String phoneNumber
+    ) {}
+
+    public record ConfirmPayoPaymentRequest(
+        @NotBlank String receiptReference,
+        String receiptImageUrl,
+        Boolean providerTransferConfirmed,
+        Boolean commissionTransferConfirmed,
+        String notes
+    ) {}
 }

@@ -38,6 +38,7 @@ public class AdminGovernanceService {
     private final CategoryDocumentRequirementRepository requirementRepo;
     private final ProviderRegistrationRepository providerRepo;
     private final ProviderDocumentRepository providerDocRepo;
+    private final PaymentTransactionRepository paymentRepo;
     private final UserSyncService userSyncService;
 
     public AdminGovernanceService(
@@ -55,6 +56,7 @@ public class AdminGovernanceService {
             CategoryDocumentRequirementRepository requirementRepo,
             ProviderRegistrationRepository providerRepo,
             ProviderDocumentRepository providerDocRepo,
+            PaymentTransactionRepository paymentRepo,
             UserSyncService userSyncService
     ) {
         this.userRepo = userRepo;
@@ -71,6 +73,7 @@ public class AdminGovernanceService {
         this.requirementRepo = requirementRepo;
         this.providerRepo = providerRepo;
         this.providerDocRepo = providerDocRepo;
+        this.paymentRepo = paymentRepo;
         this.userSyncService = userSyncService;
     }
 
@@ -117,6 +120,7 @@ public class AdminGovernanceService {
         data.put("bookings", bookingRepo.findAllByOrderByCreatedAtDesc());
         data.put("deliveries", deliveryRepo.findAllByOrderByCreatedAtDesc());
         data.put("commissions", commissionRepo.findAllByOrderByCreatedAtDesc());
+        data.put("paymentTransactions", paymentRepo.findAllByOrderByCreatedAtDesc());
         data.put("auditLogs", auditLogRepo.findAllByOrderByCreatedAtDesc());
         data.put("settings", settingRepo.findAll());
         data.put("documentTypes", documentTypeRepo.findAllByOrderByDocumentNameAscIdAsc());
@@ -636,6 +640,8 @@ public class AdminGovernanceService {
         BigDecimal totalProviderNet = BigDecimal.ZERO;
         BigDecimal digitalGross = BigDecimal.ZERO;
         BigDecimal cashGross = BigDecimal.ZERO;
+        BigDecimal chapaGross = BigDecimal.ZERO;
+        BigDecimal payoGross = BigDecimal.ZERO;
 
         Map<String, Map<String, Object>> taxpayerMap = new LinkedHashMap<>();
         List<Map<String, Object>> ledger = new ArrayList<>();
@@ -661,6 +667,11 @@ public class AdminGovernanceService {
                 cashGross = cashGross.add(gross);
             } else {
                 digitalGross = digitalGross.add(gross);
+            }
+            if ("CHAPA".equalsIgnoreCase(c.getPaymentMethod())) {
+                chapaGross = chapaGross.add(gross);
+            } else if ("PAYO".equalsIgnoreCase(c.getPaymentMethod())) {
+                payoGross = payoGross.add(gross);
             }
 
             Business biz = c.getBusinessId() != null ? bizMap.get(c.getBusinessId()) : null;
@@ -709,6 +720,13 @@ public class AdminGovernanceService {
             row.put("commissionAmount", c.getCommissionAmount());
             row.put("providerAmount", c.getProviderAmount());
             row.put("paymentMethod", c.getPaymentMethod());
+            row.put("gateway", c.getGateway());
+            row.put("gatewayTxRef", c.getGatewayTxRef());
+            row.put("platformCommissionAccount", c.getPlatformCommissionAccount());
+            row.put("providerPayoutAccount", c.getProviderPayoutAccount());
+            row.put("chapaSubaccountId", c.getChapaSubaccountId());
+            row.put("commissionSettlementStatus", c.getCommissionSettlementStatus());
+            row.put("providerSettlementStatus", c.getProviderSettlementStatus());
             row.put("status", c.getStatus());
             row.put("createdAt", c.getCreatedAt());
             ledger.add(row);
@@ -738,6 +756,8 @@ public class AdminGovernanceService {
         summary.put("totalProviderNetEtb", totalProviderNet);
         summary.put("digitalGrossEtb", digitalGross);
         summary.put("cashGrossEtb", cashGross);
+        summary.put("chapaGrossEtb", chapaGross);
+        summary.put("payoGrossEtb", payoGross);
         summary.put("digitalComplianceRatePercent", complianceRate);
         summary.put("escrowHeldTotalEtb", escrowHeldTotal);
         summary.put("activeDisputeCount", activeDisputeCount);

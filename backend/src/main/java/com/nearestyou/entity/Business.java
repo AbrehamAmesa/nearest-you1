@@ -87,6 +87,30 @@ public class Business {
     @Column(name = "is_featured", nullable = false)
     private boolean isFeatured = false;
 
+    @Column(name = "payout_bank_code")
+    private String payoutBankCode;
+
+    @Column(name = "payout_bank_name")
+    private String payoutBankName;
+
+    @Column(name = "payout_account_number")
+    private String payoutAccountNumber;
+
+    @Column(name = "payout_account_name")
+    private String payoutAccountName;
+
+    @Column(name = "payout_telebirr_number")
+    private String payoutTelebirrNumber;
+
+    @Column(name = "payo_account_handle")
+    private String payoAccountHandle;
+
+    @Column(name = "chapa_subaccount_id")
+    private String chapaSubaccountId;
+
+    @Column(name = "preferred_payout_gateway")
+    private String preferredPayoutGateway = "BOTH";
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -167,6 +191,32 @@ public class Business {
 
     public boolean isFeatured() { return isFeatured; }
     public void setFeatured(boolean featured) { isFeatured = featured; }
+
+    public String getPayoutBankCode() { return payoutBankCode; }
+    public void setPayoutBankCode(String payoutBankCode) { this.payoutBankCode = payoutBankCode; }
+
+    public String getPayoutBankName() { return payoutBankName; }
+    public void setPayoutBankName(String payoutBankName) { this.payoutBankName = payoutBankName; }
+
+    public String getPayoutAccountNumber() { return payoutAccountNumber; }
+    public void setPayoutAccountNumber(String payoutAccountNumber) { this.payoutAccountNumber = payoutAccountNumber; }
+
+    public String getPayoutAccountName() { return payoutAccountName; }
+    public void setPayoutAccountName(String payoutAccountName) { this.payoutAccountName = payoutAccountName; }
+
+    public String getPayoutTelebirrNumber() { return payoutTelebirrNumber; }
+    public void setPayoutTelebirrNumber(String payoutTelebirrNumber) { this.payoutTelebirrNumber = payoutTelebirrNumber; }
+
+    public String getPayoAccountHandle() { return payoAccountHandle; }
+    public void setPayoAccountHandle(String payoAccountHandle) { this.payoAccountHandle = payoAccountHandle; }
+
+    public String getChapaSubaccountId() { return chapaSubaccountId; }
+    public void setChapaSubaccountId(String chapaSubaccountId) { this.chapaSubaccountId = chapaSubaccountId; }
+
+    public String getPreferredPayoutGateway() {
+        return preferredPayoutGateway != null && !preferredPayoutGateway.isBlank() ? preferredPayoutGateway : "BOTH";
+    }
+    public void setPreferredPayoutGateway(String preferredPayoutGateway) { this.preferredPayoutGateway = preferredPayoutGateway; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

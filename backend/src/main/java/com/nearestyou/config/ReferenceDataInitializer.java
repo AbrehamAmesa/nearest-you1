@@ -64,6 +64,23 @@ public class ReferenceDataInitializer implements ApplicationRunner {
             settingRepo.save(policy);
         }
 
+        if (settingRepo.findBySettingKey("platform_commission_account").isEmpty()) {
+            PlatformSetting commAcc = new PlatformSetting();
+            commAcc.setSettingKey("platform_commission_account");
+            Map<String, Object> accValue = new LinkedHashMap<>();
+            accValue.put("accountHolderName", "Nearest You Platform Commission Pool");
+            accValue.put("bankCode", "128");
+            accValue.put("bankName", "Commercial Bank of Ethiopia (CBE)");
+            accValue.put("accountNumber", "1000458921403");
+            accValue.put("telebirrNumber", "+251911000111");
+            accValue.put("chapaSettlementLabel", "Nearest You Master Chapa Settlement");
+            accValue.put("payoAccountHandle", "NY-PLATFORM-COMM-01");
+            accValue.put("chapaEnabled", true);
+            accValue.put("payoEnabled", true);
+            commAcc.setSettingValue(accValue);
+            settingRepo.save(commAcc);
+        }
+
         Map<String, DocumentType> docTypeMap = ensureDocumentTypes();
 
         if (categoryRepo.count() == 0) {

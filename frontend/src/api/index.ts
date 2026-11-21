@@ -12,6 +12,7 @@ export const userApi = {
   updateProfile: (payload: unknown) => api.put('/api/v1/users/profile', payload),
   heartbeat: () => api.post('/api/v1/users/heartbeat'),
   getWorkspace: () => api.get('/api/v1/me/workspace'),
+  updatePayoutAccount: (payload: unknown) => api.put('/api/v1/me/payout-account', payload),
 };
 
 // PublicCatalogController
@@ -49,6 +50,8 @@ export const providerApi = {
 export const businessApi = {
   getPortal: () => api.get('/api/v1/business/portal'),
   createBusiness: (payload: unknown) => api.post('/api/v1/businesses', payload),
+  updatePayoutAccount: (businessId: number | string, payload: unknown) =>
+    api.put(`/api/v1/businesses/${businessId}/payout-account`, payload),
   createListing: (payload: unknown) => api.post('/api/v1/listings', payload),
   updateListing: (id: number | string, payload: unknown) => api.put(`/api/v1/listings/${id}`, payload),
   updateAvailability: (id: number | string, payload: unknown) => api.patch(`/api/v1/listings/${id}/availability`, payload),
@@ -114,10 +117,38 @@ export const adminApi = {
   deleteCategory: (id: number | string) => api.delete(`/api/v1/admin/categories/${id}`),
   updatePricingPolicy: (payload: unknown) => api.put('/api/v1/admin/pricing-policy', payload),
   updateOnboardingGovernance: (payload: unknown) => api.put('/api/v1/admin/onboarding-governance', payload),
+  updateCommissionAccount: (payload: unknown) => api.put('/api/v1/admin/commission-account', payload),
   updateUserStatus: (id: number | string, payload: unknown) => api.post(`/api/v1/admin/users/${id}/status`, payload),
   updateAdminRole: (id: number | string, payload: unknown) => api.post(`/api/v1/admin/users/${id}/admin-role`, payload),
   vouchEarly: (id: number | string, payload: unknown) => api.post(`/api/v1/admin/users/${id}/vouch-early`, payload),
   updateUserRoles: (id: number | string, payload: unknown) => api.post(`/api/v1/admin/users/${id}/roles`, payload),
+};
+
+// PaymentController (Chapa & Payo)
+export const paymentApi = {
+  getConfig: () => api.get('/api/v1/payments/config'),
+  getBanks: () => api.get('/api/v1/payments/banks'),
+  initialize: (payload: {
+    gateway: 'CHAPA' | 'PAYO';
+    transactionType: 'ORDER' | 'BOOKING' | 'DELIVERY' | 'RIDE';
+    referenceId: number;
+    returnUrl?: string;
+    customerEmail?: string;
+    phoneNumber?: string;
+  }) => api.post('/api/v1/payments/initialize', payload),
+  verify: (txRef: string) => api.post(`/api/v1/payments/${encodeURIComponent(txRef)}/verify`),
+  confirmPayo: (
+    txRef: string,
+    payload: {
+      receiptReference: string;
+      receiptImageUrl?: string;
+      providerTransferConfirmed?: boolean;
+      commissionTransferConfirmed?: boolean;
+      notes?: string;
+    }
+  ) => api.post(`/api/v1/payments/payo/${encodeURIComponent(txRef)}/confirm`, payload),
+  getMine: () => api.get('/api/v1/payments/mine'),
+  getProviderSettlements: () => api.get('/api/v1/payments/provider-settlements'),
 };
 
 // OpenStreetMap / OSRM public services (not Spring controller endpoints)

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type {
   AuditLogRecord,
+  BankDirectoryItem,
   BookingRecord,
   Business,
   Category,
@@ -32,9 +33,11 @@ import type {
   Listing,
   OnboardingGovernance,
   OrderRecord,
+  PlatformCommissionAccountConfig,
   PlatformPolicy,
   ProviderRegistration,
 } from '../types/nearestyou.ts';
+import { adminApi, paymentApi } from '../api/index.ts';
 import { formatEtb } from '../utils/geo.ts';
 import {
   TRANSLATIONS,
@@ -158,6 +161,21 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
     governance.requirePeerQrAfterFirstProvider
   );
 
+  // Single Platform Commission Collection Account state (Chapa & Payo)
+  const [banks, setBanks] = useState<BankDirectoryItem[]>([]);
+  const [commAcct, setCommAcct] = useState<PlatformCommissionAccountConfig>({
+    accountHolderName: 'Nearest You Platform Commission Pool',
+    bankCode: '130',
+    bankName: 'Commercial Bank of Ethiopia (CBE)',
+    accountNumber: '1000458921403',
+    telebirrNumber: '+251911000111',
+    chapaSettlementLabel: 'NearestYou-Commission-Main',
+    payoAccountHandle: '@nearestyou_commission',
+    chapaEnabled: true,
+    payoEnabled: true,
+  });
+  const [savingCommAcct, setSavingCommAcct] = useState(false);
+
   useEffect(() => {
     setTaxRate(policy.taxRatePercent);
     setDeliveryBase(policy.deliveryBaseFee);
@@ -217,6 +235,16 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
           setReqDocNumber(activeDocTypes[0].defaultRequiresDocumentNumber);
         }
       }
+      paymentApi
+        .getConfig()
+        .then((cfgRes) => {
+          const cfg = cfgRes.data;
+          if (Array.isArray(cfg?.banks)) setBanks(cfg.banks);
+          if (cfg?.platformCommissionAccount) {
+            setCommAcct((prev) => ({ ...prev, ...cfg.platformCommissionAccount }));
+          }
+        })
+        .catch(() => {});
     } catch (err) {
       console.error(err);
     }
@@ -596,6 +624,31 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
     } else {
       const err = await res.json();
       onNotify(err.error || 'Could not save onboarding governance.');
+    }
+  };
+
+  const handleSaveCommissionAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!commAcct.accountNumber.trim()) {
+      onNotify('Enter the Platform Commission Collection Account number.');
+      return;
+    }
+    setSavingCommAcct(true);
+    try {
+      const matchedBank = banks.find((b) => b.code === commAcct.bankCode);
+      const res = await adminApi.updateCommissionAccount({
+        ...commAcct,
+        bankName: matchedBank?.name || commAcct.bankName,
+      });
+      if (res.data) {
+        setCommAcct((prev) => ({ ...prev, ...res.data }));
+      }
+      onNotify('Single Platform Commission Account updated for Chapa & Payo.');
+      loadAdminData();
+    } catch (err: any) {
+      onNotify(err?.response?.data?.error || 'Could not update platform commission account.');
+    } finally {
+      setSavingCommAcct(false);
     }
   };
 
@@ -2490,6 +2543,161 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
               Save Peer QR & Approver Governance
             </button>
           </form>
+
+          {/* Single Platform Commission Collection Account (Chapa & Payo) */}
+          <form
+            onSubmit={handleSaveCommissionAccount}
+            className="space-y-4 rounded-2xl border border-[#176B52]/25 bg-white p-6 lg:col-span-2"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#172B3A]/10 pb-3">
+              <div>
+                <h2 className="flex items-center gap-2 font-display text-lg font-semibold text-[#172B3A]">
+                  <Landmark className="h-5 w-5 text-[#176B52]" />
+                  Single Platform Commission Collection Account (Chapa &amp; Payo)
+                </h2>
+                <p className="mt-1 text-xs text-[#172B3A]/65">
+                  All platform commission across every merchant order, service booking, and delivery
+                  routes into this single centralized account while service providers collect their
+                  net sales in their own accounts.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 text-xs font-semibold">
+                <label className="inline-flex cursor-pointer items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={commAcct.chapaEnabled}
+                    onChange={(e) =>
+                      setCommAcct((p) => ({ ...p, chapaEnabled: e.target.checked }))
+                    }
+                    className="h-4 w-4 accent-[#176B52]"
+                  />
+                  Chapa Enabled
+                </label>
+                <label className="inline-flex cursor-pointer items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={commAcct.payoEnabled}
+                    onChange={(e) =>
+                      setCommAcct((p) => ({ ...p, payoEnabled: e.target.checked }))
+                    }
+                    className="h-4 w-4 accent-[#176B52]"
+                  />
+                  Payo Enabled
+                </label>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="block text-xs font-medium text-[#172B3A]/75">
+                  Commission Account Holder
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={commAcct.accountHolderName}
+                  onChange={(e) =>
+                    setCommAcct((p) => ({ ...p, accountHolderName: e.target.value }))
+                  }
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#172B3A]/75">
+                  Ethiopian Settlement Bank
+                </label>
+                <select
+                  value={commAcct.bankCode}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    const matched = banks.find((b) => b.code === code);
+                    setCommAcct((p) => ({
+                      ...p,
+                      bankCode: code,
+                      bankName: matched?.name || p.bankName,
+                    }));
+                  }}
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs"
+                >
+                  {(banks.length > 0
+                    ? banks
+                    : [
+                        { code: '130', name: 'Commercial Bank of Ethiopia (CBE)', currency: 'ETB' },
+                        { code: '855', name: 'Telebirr', currency: 'ETB' },
+                      ]
+                  ).map((b) => (
+                    <option key={b.code} value={b.code}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#172B3A]/75">
+                  Central Commission Account Number
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={commAcct.accountNumber}
+                  onChange={(e) =>
+                    setCommAcct((p) => ({ ...p, accountNumber: e.target.value }))
+                  }
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#172B3A]/75">
+                  Telebirr Commission Wallet
+                </label>
+                <input
+                  type="tel"
+                  value={commAcct.telebirrNumber || ''}
+                  onChange={(e) =>
+                    setCommAcct((p) => ({ ...p, telebirrNumber: e.target.value }))
+                  }
+                  placeholder="+251 9..."
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#172B3A]/75">
+                  Chapa Settlement Label
+                </label>
+                <input
+                  type="text"
+                  value={commAcct.chapaSettlementLabel || ''}
+                  onChange={(e) =>
+                    setCommAcct((p) => ({ ...p, chapaSettlementLabel: e.target.value }))
+                  }
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#172B3A]/75">
+                  Payo Pool Account Handle
+                </label>
+                <input
+                  type="text"
+                  value={commAcct.payoAccountHandle || ''}
+                  onChange={(e) =>
+                    setCommAcct((p) => ({ ...p, payoAccountHandle: e.target.value }))
+                  }
+                  className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingCommAcct}
+              className="min-h-[44px] rounded-lg bg-[#176B52] px-5 py-2.5 text-xs font-semibold text-white hover:bg-[#125641] disabled:opacity-60"
+            >
+              {savingCommAcct
+                ? 'Saving Commission Account...'
+                : 'Save Single Platform Commission Account'}
+            </button>
+          </form>
         </div>
       )}
 
@@ -2564,6 +2772,8 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                   className="mt-1 h-9 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-2.5 text-xs"
                 >
                   <option value="ALL">All Payment Methods</option>
+                  <option value="CHAPA">Chapa Split Pay</option>
+                  <option value="PAYO">Payo Direct Transfer</option>
                   <option value="TELEBIRR">Telebirr (Digital)</option>
                   <option value="CBE_BIRR">CBE Birr (Digital)</option>
                   <option value="DIGITAL_BANK">Digital Bank</option>
@@ -2643,20 +2853,24 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
 
                   {/* Digital vs Cash Tax Audit Strip */}
                   <div className="grid gap-4 sm:grid-cols-2 text-xs">
-                    <div className="rounded-xl border border-[#176B52]/20 bg-emerald-50/30 p-4 flex justify-between">
+                    <div className="rounded-xl border border-[#176B52]/20 bg-emerald-50/30 p-4 flex justify-between gap-3">
                       <div>
                         <p className="font-semibold text-[#176B52]">
-                          Digital Payments (Telebirr / CBE Birr / Bank)
+                          Digital Payments (Chapa / Payo / Telebirr / CBE / Bank)
                         </p>
                         <p className="text-[#172B3A]/65">
                           Gross Traceable Volume: {formatEtb(taxReport.summary.digitalGrossEtb)}
                         </p>
+                        <p className="mt-0.5 font-mono text-[11px] text-[#176B52]">
+                          Chapa: {formatEtb(taxReport.summary.chapaGrossEtb || 0)} · Payo:{' '}
+                          {formatEtb(taxReport.summary.payoGrossEtb || 0)}
+                        </p>
                       </div>
-                      <p className="font-mono font-bold text-[#176B52] tabular-nums">
+                      <p className="font-mono font-bold text-[#176B52] tabular-nums shrink-0">
                         {taxReport.summary.digitalComplianceRatePercent}% Traceable
                       </p>
                     </div>
-                    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 flex justify-between">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 flex justify-between gap-3">
                       <div>
                         <p className="font-semibold text-amber-900">
                           Cash / COD Declared Transactions
@@ -2665,7 +2879,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                           Gross Cash Volume: {formatEtb(taxReport.summary.cashGrossEtb)}
                         </p>
                       </div>
-                      <p className="font-mono font-bold text-amber-900 tabular-nums">
+                      <p className="font-mono font-bold text-amber-900 tabular-nums shrink-0">
                         Commission: {formatEtb(taxReport.summary.totalPlatformCommissionEtb)}
                       </p>
                     </div>
@@ -2899,7 +3113,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                       <th className="px-4 py-3 font-semibold">Fiscal Receipt</th>
                       <th className="px-4 py-3 font-semibold">Tx Ref & Source</th>
                       <th className="px-4 py-3 font-semibold">Taxpayer / TIN</th>
-                      <th className="px-4 py-3 font-semibold">Payment</th>
+                      <th className="px-4 py-3 font-semibold">Payment &amp; Split Accounts</th>
                       <th className="px-4 py-3 font-semibold text-right">Taxable</th>
                       <th className="px-4 py-3 font-semibold text-right">VAT 15%</th>
                       <th className="px-4 py-3 font-semibold text-right">WHT 2%</th>
@@ -2923,7 +3137,21 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                             TIN: {row.tinNumber || 'Platform'}
                           </p>
                         </td>
-                        <td className="px-4 py-3 font-mono text-[11px]">{row.paymentMethod}</td>
+                        <td className="px-4 py-3 font-mono text-[11px]">
+                          <p className="font-semibold text-[#172B3A]">
+                            {row.gateway || row.paymentMethod}
+                          </p>
+                          {row.providerPayoutAccount && (
+                            <p className="text-[10px] text-[#176B52] truncate max-w-[200px]">
+                              Provider: {row.providerPayoutAccount}
+                            </p>
+                          )}
+                          {row.platformCommissionAccount && (
+                            <p className="text-[10px] text-[#172B3A]/55 truncate max-w-[200px]">
+                              Comm: {row.platformCommissionAccount}
+                            </p>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-right font-mono tabular-nums">
                           {formatEtb(row.taxableAmount)}
                         </td>

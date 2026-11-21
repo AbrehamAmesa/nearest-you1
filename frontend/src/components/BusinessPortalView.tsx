@@ -8,6 +8,7 @@ import {
   Clock,
   FileText,
   ImagePlus,
+  Landmark,
   MapPin,
   MessageSquare,
   Navigation,
@@ -19,9 +20,11 @@ import {
   ShieldOff,
   Upload,
   Video,
+  Wallet,
   X,
 } from 'lucide-react';
 import type {
+  BankDirectoryItem,
   BookingRecord,
   Business,
   Category,
@@ -33,6 +36,7 @@ import type {
   ListingMetadata,
   OnboardingGovernance,
   OrderRecord,
+  PaymentTransactionRecord,
   ProviderRegistration,
 } from '../types/nearestyou.ts';
 import { ADDIS_SUB_CITIES, formatEtb } from '../utils/geo.ts';
@@ -50,7 +54,7 @@ import {
 } from '../utils/media.ts';
 import { calculateReturnLoss } from '../utils/listingPolicy.ts';
 import { formatEtaClock, formatLastSeenStatus } from '../utils/presence.ts';
-import { engagementApi } from '../api/index.ts';
+import { businessApi, engagementApi, paymentApi } from '../api/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useLiveChatInboxListener } from '../hooks/useLiveChat.ts';
 import { ContractOfferSection } from './ContractOfferSection.tsx';
@@ -64,12 +68,13 @@ export type BusinessPortalTab =
   | 'PROVIDER_KYC'
   | 'PEER_VOUCH'
   | 'APPROVALS'
+  | 'REGISTER'
   | 'CATALOG'
   | 'ORDERS'
   | 'BOOKINGS'
   | 'MESSAGES'
   | 'RECRUITMENT'
-  | 'REGISTER';
+  | 'PAYOUTS';
 
 interface BusinessPortalViewProps {
   categories: Category[];
@@ -113,6 +118,18 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
   const [applications, setApplications] = useState<JobApplicationRecord[]>([]);
   const [commissions, setCommissions] = useState<CommissionRecord[]>([]);
+  const [paymentTransactions, setPaymentTransactions] = useState<PaymentTransactionRecord[]>([]);
+  const [banks, setBanks] = useState<BankDirectoryItem[]>([]);
+  const [payoutBizId, setPayoutBizId] = useState<number>(0);
+  const [payoutBankCode, setPayoutBankCode] = useState('130');
+  const [payoutBankName, setPayoutBankName] = useState('Commercial Bank of Ethiopia (CBE)');
+  const [payoutAccountNumber, setPayoutAccountNumber] = useState('');
+  const [payoutAccountName, setPayoutAccountName] = useState('');
+  const [payoutTelebirrNumber, setPayoutTelebirrNumber] = useState('');
+  const [payoAccountHandle, setPayoAccountHandle] = useState('');
+  const [preferredPayoutGateway, setPreferredPayoutGateway] = useState<'BOTH' | 'CHAPA' | 'PAYO'>('BOTH');
+  const [savingPayout, setSavingPayout] = useState(false);
+
   const [providerReg, setProviderReg] = useState<ProviderRegistration | null>(null);
   const [portalReqs, setPortalReqs] = useState<CategoryDocumentRequirement[]>(documentRequirements);
   const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
@@ -252,10 +269,11 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   const loadPortalData = async () => {
     if (!firebaseUser) return;
     try {
-      const [portalRes, meRes, threadsRes] = await Promise.allSettled([
+      const [portalRes, meRes, threadsRes, banksRes] = await Promise.allSettled([
         authFetch('/api/v1/business/portal'),
         authFetch('/api/v1/auth/me'),
         engagementApi.getChatThreads(),
+        paymentApi.getBanks(),
       ]);
       if (portalRes.status === 'fulfilled' && portalRes.value.ok) {
         const data = await portalRes.value.json();
@@ -264,6 +282,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
         setBookings(data.bookings || []);
         setApplications(data.applications || []);
         setCommissions(data.commissions || []);
+        setPaymentTransactions(data.paymentTransactions || []);
         setProviderReg(data.providerRegistration || null);
         if (data.documentRequirements) {
           setPortalReqs(data.documentRequirements);
@@ -281,6 +300,9 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
           : [];
         setThreads(nextThreads);
         setSelectedThreadKey((prev) => prev || nextThreads[0]?.threadKey || null);
+      }
+      if (banksRes.status === 'fulfilled' && Array.isArray(banksRes.value.data)) {
+        setBanks(banksRes.value.data);
       }
     } catch (err) {
       console.error(err);
@@ -372,7 +394,19 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
         setListingType(matchedCat.defaultListingType);
       }
     }
-  }, [ownedBusinesses, categories, selectedBizId]);
+    if (ownedBusinesses.length > 0 && !ownedBusinesses.some((b) => b.id === payoutBizId)) {
+      const firstBiz = ownedBusinesses[0];
+      setPayoutBizId(firstBiz.id);
+      setPayoutBankCode(firstBiz.payoutBankCode || '130');
+      setPayoutBankName(firstBiz.payoutBankName || 'Commercial Bank of Ethiopia (CBE)');
+      setPayoutAccountNumber(firstBiz.payoutAccountNumber || '');
+      setPayoutAccountName(firstBiz.payoutAccountName || firstBiz.businessName);
+      setPayoutTelebirrNumber(firstBiz.payoutTelebirrNumber || firstBiz.contactPhone || '');
+      setPayoAccountHandle(firstBiz.payoAccountHandle || '');
+      const gw = firstBiz.preferredPayoutGateway;
+      setPreferredPayoutGateway(gw === 'CHAPA' || gw === 'PAYO' ? gw : 'BOTH');
+    }
+  }, [ownedBusinesses, categories, selectedBizId, payoutBizId]);
 
   useEffect(() => {
     const pool = activeCategories.length > 0 ? activeCategories : categories;
@@ -810,6 +844,54 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     }
   };
 
+  const handleSelectPayoutBusiness = (bizId: number) => {
+    setPayoutBizId(bizId);
+    const biz = ownedBusinesses.find((b) => b.id === bizId);
+    if (!biz) return;
+    setPayoutBankCode(biz.payoutBankCode || '130');
+    setPayoutBankName(biz.payoutBankName || 'Commercial Bank of Ethiopia (CBE)');
+    setPayoutAccountNumber(biz.payoutAccountNumber || '');
+    setPayoutAccountName(biz.payoutAccountName || biz.businessName);
+    setPayoutTelebirrNumber(biz.payoutTelebirrNumber || biz.contactPhone || '');
+    setPayoAccountHandle(biz.payoAccountHandle || '');
+    const gw = biz.preferredPayoutGateway;
+    setPreferredPayoutGateway(gw === 'CHAPA' || gw === 'PAYO' ? gw : 'BOTH');
+  };
+
+  const handleSaveBusinessPayout = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!payoutBizId) return;
+    if (!payoutAccountNumber.trim() && !payoutTelebirrNumber.trim() && !payoAccountHandle.trim()) {
+      onNotify('Enter a bank account number, Telebirr number, or Payo handle first.');
+      return;
+    }
+    setSavingPayout(true);
+    try {
+      const matchedBank = banks.find((b) => b.code === payoutBankCode);
+      const res = await businessApi.updatePayoutAccount(payoutBizId, {
+        payoutBankCode,
+        payoutBankName: matchedBank?.name || payoutBankName,
+        payoutAccountNumber: payoutAccountNumber.trim(),
+        payoutAccountName: payoutAccountName.trim(),
+        payoutTelebirrNumber: payoutTelebirrNumber.trim(),
+        payoAccountHandle: payoAccountHandle.trim(),
+        preferredPayoutGateway,
+      });
+      const subId = res.data?.chapaSubaccountId;
+      onNotify(
+        subId
+          ? `Business payout account saved & Chapa Subaccount (${subId}) provisioned.`
+          : 'Business sales payout account saved.'
+      );
+      await loadPortalData();
+      onRefreshCatalog();
+    } catch (err: any) {
+      onNotify(err?.response?.data?.error || 'Could not save business payout account.');
+    } finally {
+      setSavingPayout(false);
+    }
+  };
+
   const totalGross = commissions.reduce((s, c) => s + Number(c.grossAmount), 0);
   const totalNet = commissions.reduce((s, c) => s + Number(c.providerAmount), 0);
   const ownedBusinessIds = new Set(ownedBusinesses.map((b) => b.id));
@@ -866,6 +948,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     { id: 'ORDERS', label: `Orders (${orders.length})` },
     { id: 'BOOKINGS', label: `Service Requests & Bookings (${bookings.length})` },
     { id: 'MESSAGES', label: `Messages & Live Chat (${threads.length})` },
+    { id: 'PAYOUTS', label: `My Sales Account & Ledger (${paymentTransactions.length})` },
     { id: 'RECRUITMENT', label: `Applicants (${applications.length})` },
   ];
 
@@ -3005,6 +3088,283 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
               Submit Business for Verification
             </button>
           </form>
+        </div>
+      )}
+
+      {tab === 'PAYOUTS' && (
+        <div className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-12">
+            <form
+              onSubmit={handleSaveBusinessPayout}
+              className="space-y-4 rounded-2xl border border-[#172B3A]/10 bg-white p-5 sm:p-6 lg:col-span-5"
+            >
+              <div className="border-b border-[#172B3A]/10 pb-3">
+                <h2 className="flex items-center gap-2 font-display text-lg font-bold text-[#172B3A]">
+                  <Landmark className="h-5 w-5 text-[#176B52]" />
+                  Service Provider Own Sales Account
+                </h2>
+                <p className="mt-1 text-xs text-[#172B3A]/65">
+                  Configure your business&apos;s own Ethiopian bank, Telebirr, and Payo details so
+                  net sales settle directly to you via Chapa &amp; Payo while platform commission
+                  collects in the platform commission account.
+                </p>
+              </div>
+
+              {ownedBusinesses.length === 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950">
+                  Register a business first to bind a storefront payout account, or set your personal
+                  driver/freelancer payout account under Account Profile → Payout Account.
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-[#172B3A]/75">
+                      Select Business
+                    </label>
+                    <select
+                      value={payoutBizId}
+                      onChange={(e) => handleSelectPayoutBusiness(Number(e.target.value))}
+                      className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs font-semibold"
+                    >
+                      {ownedBusinesses.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.businessName} ({b.subCity})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {(() => {
+                    const activeBiz = ownedBusinesses.find((b) => b.id === payoutBizId);
+                    if (!activeBiz?.chapaSubaccountId) return null;
+                    return (
+                      <div className="rounded-lg border border-[#176B52]/25 bg-emerald-50/50 px-3 py-2 font-mono text-[11px] font-semibold text-[#176B52]">
+                        Active Chapa Subaccount ID: {activeBiz.chapaSubaccountId}
+                      </div>
+                    );
+                  })()}
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-medium text-[#172B3A]/75">
+                        Settlement Bank
+                      </label>
+                      <select
+                        value={payoutBankCode}
+                        onChange={(e) => {
+                          const code = e.target.value;
+                          setPayoutBankCode(code);
+                          const bk = banks.find((x) => x.code === code);
+                          if (bk) setPayoutBankName(bk.name);
+                        }}
+                        className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs"
+                      >
+                        {(banks.length > 0
+                          ? banks
+                          : [
+                              {
+                                code: '130',
+                                name: 'Commercial Bank of Ethiopia (CBE)',
+                                currency: 'ETB',
+                              },
+                              { code: '855', name: 'Telebirr', currency: 'ETB' },
+                            ]
+                        ).map((bk) => (
+                          <option key={bk.code} value={bk.code}>
+                            {bk.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-[#172B3A]/75">
+                        Account Number
+                      </label>
+                      <input
+                        type="text"
+                        value={payoutAccountNumber}
+                        onChange={(e) => setPayoutAccountNumber(e.target.value)}
+                        placeholder="e.g., 1000234567890"
+                        className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-medium text-[#172B3A]/75">
+                        Account Holder Name
+                      </label>
+                      <input
+                        type="text"
+                        value={payoutAccountName}
+                        onChange={(e) => setPayoutAccountName(e.target.value)}
+                        placeholder="Legal account name"
+                        className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-[#172B3A]/75">
+                        Telebirr Wallet Number
+                      </label>
+                      <input
+                        type="tel"
+                        value={payoutTelebirrNumber}
+                        onChange={(e) => setPayoutTelebirrNumber(e.target.value)}
+                        placeholder="+251 9..."
+                        className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs font-medium text-[#172B3A]/75">
+                        Payo Account Handle
+                      </label>
+                      <input
+                        type="text"
+                        value={payoAccountHandle}
+                        onChange={(e) => setPayoAccountHandle(e.target.value)}
+                        placeholder="@business_payo"
+                        className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-[#172B3A]/75">
+                        Preferred Payout Gateway
+                      </label>
+                      <select
+                        value={preferredPayoutGateway}
+                        onChange={(e) =>
+                          setPreferredPayoutGateway(e.target.value as 'BOTH' | 'CHAPA' | 'PAYO')
+                        }
+                        className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs font-semibold"
+                      >
+                        <option value="BOTH">Both Chapa &amp; Payo</option>
+                        <option value="CHAPA">Chapa Split Pay</option>
+                        <option value="PAYO">Payo Direct</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={savingPayout}
+                    className="w-full min-h-[44px] rounded-lg bg-[#176B52] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#125641] disabled:opacity-60"
+                  >
+                    {savingPayout
+                      ? 'Saving & Provisioning Subaccount...'
+                      : 'Save My Business Sales Account'}
+                  </button>
+                </>
+              )}
+            </form>
+
+            <div className="space-y-4 rounded-2xl border border-[#172B3A]/10 bg-white p-5 sm:p-6 lg:col-span-7">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#172B3A]/10 pb-3">
+                <div>
+                  <h2 className="flex items-center gap-2 font-display text-lg font-bold text-[#172B3A]">
+                    <Wallet className="h-5 w-5 text-[#176B52]" />
+                    Chapa &amp; Payo Split Settlement Ledger ({paymentTransactions.length})
+                  </h2>
+                  <p className="mt-0.5 text-xs text-[#172B3A]/65">
+                    Shows net sales routed to your own account vs. platform commission routed to the
+                    single platform account.
+                  </p>
+                </div>
+              </div>
+
+              {paymentTransactions.length === 0 ? (
+                <p className="py-12 text-center text-xs text-[#172B3A]/60">
+                  No Chapa or Payo split payment transactions recorded yet.
+                </p>
+              ) : (
+                <>
+                  <div className="space-y-3 md:hidden">
+                    {paymentTransactions.map((ptx) => (
+                      <div
+                        key={`mptx-${ptx.id}`}
+                        className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/50 p-3.5 text-xs space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-2 font-mono">
+                          <span className="font-bold text-[#172B3A]">{ptx.txRef}</span>
+                          <span className="font-bold text-[#176B52]">
+                            {ptx.gateway} · {ptx.status}
+                          </span>
+                        </div>
+                        <p className="text-[#172B3A]/75">
+                          {ptx.transactionType} {ptx.referenceCode} · Gross:{' '}
+                          <span className="font-mono font-semibold">
+                            {formatEtb(Number(ptx.grossAmount))}
+                          </span>
+                        </p>
+                        <p className="font-mono text-[11px] text-[#176B52]">
+                          Your Net: {formatEtb(Number(ptx.providerAmount))} ({ptx.providerLegStatus})
+                        </p>
+                        <p className="font-mono text-[11px] text-[#172B3A]/65">
+                          Platform Comm: {formatEtb(Number(ptx.commissionAmount))} (
+                          {ptx.commissionLegStatus})
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full min-w-[680px] text-left text-xs">
+                      <thead className="border-b border-[#172B3A]/10 bg-[#F4F6F5] text-[#172B3A]/70">
+                        <tr>
+                          <th className="px-3 py-2.5 font-semibold">Tx Ref &amp; Order</th>
+                          <th className="px-3 py-2.5 font-semibold">Gateway</th>
+                          <th className="px-3 py-2.5 font-semibold text-right">Gross</th>
+                          <th className="px-3 py-2.5 font-semibold text-right">
+                            Platform Commission
+                          </th>
+                          <th className="px-3 py-2.5 font-semibold text-right">Your Net Sales</th>
+                          <th className="px-3 py-2.5 font-semibold">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#172B3A]/10">
+                        {paymentTransactions.map((ptx) => (
+                          <tr key={ptx.id}>
+                            <td className="px-3 py-2.5 font-mono text-[11px]">
+                              <p className="font-semibold text-[#172B3A]">{ptx.txRef}</p>
+                              <p className="text-[#172B3A]/60">
+                                {ptx.transactionType} · {ptx.referenceCode}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-[11px]">
+                              <p className="font-semibold">{ptx.gateway}</p>
+                              <p className="text-[10px] text-[#172B3A]/55">{ptx.gatewayMode}</p>
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono tabular-nums">
+                              {formatEtb(Number(ptx.grossAmount))}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono tabular-nums text-[#172B3A]/75">
+                              <p>{formatEtb(Number(ptx.commissionAmount))}</p>
+                              <p className="text-[10px] text-[#172B3A]/50">
+                                {ptx.commissionLegStatus}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-mono font-bold tabular-nums text-[#176B52]">
+                              <p>{formatEtb(Number(ptx.providerAmount))}</p>
+                              <p className="text-[10px] font-normal text-[#176B52]">
+                                {ptx.providerPayoutAccountSnapshot?.summaryLabel ||
+                                  ptx.providerLegStatus}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2.5 font-mono text-[11px] font-semibold text-[#176B52]">
+                              {ptx.status}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

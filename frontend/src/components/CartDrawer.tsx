@@ -43,7 +43,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       setDeliveryAddress(`${subCityName}, Near Main Road`);
     }
   }, [subCityName, addressTouched]);
-  const [paymentMethod, setPaymentMethod] = useState<'TELEBIRR' | 'CBE_BIRR' | 'BANK_TRANSFER' | 'CASH'>('TELEBIRR');
+  const [paymentMethod, setPaymentMethod] = useState<
+    'CHAPA' | 'PAYO' | 'TELEBIRR' | 'CBE_BIRR' | 'BANK_TRANSFER' | 'CASH'
+  >('CHAPA');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -455,6 +457,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 <span className="text-xs font-medium text-[#172B3A]/75">Ethiopian Payment Method</span>
                 <div className="grid grid-cols-2 gap-2">
                   {[
+                    { id: 'CHAPA', label: 'Chapa Split Pay' },
+                    { id: 'PAYO', label: 'Payo Direct' },
                     { id: 'TELEBIRR', label: 'Telebirr' },
                     { id: 'CBE_BIRR', label: 'CBE Birr' },
                     { id: 'BANK_TRANSFER', label: 'Bank Transfer' },
@@ -474,6 +478,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     </button>
                   ))}
                 </div>
+                {(paymentMethod === 'CHAPA' || paymentMethod === 'PAYO') && (
+                  <p className="rounded-lg border border-[#176B52]/20 bg-emerald-50/60 px-3 py-2 text-[11px] text-[#172B3A]/80">
+                    {paymentMethod === 'CHAPA'
+                      ? 'Chapa Split Pay routes vendor sales directly to each seller’s own account and collects platform commission into one centralized platform account.'
+                      : 'Payo Direct splits payment into two verified transfers: net sales to the seller’s own account and platform commission to the single platform account.'}
+                  </p>
+                )}
               </div>
             </>
           )}

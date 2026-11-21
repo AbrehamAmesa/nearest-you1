@@ -30,6 +30,8 @@ public class OrderAndBookingService {
     private final CommissionRecordRepository commissionRepo;
     private final PlatformSettingRepository settingRepo;
     private final AuditLogRepository auditLogRepo;
+    private final UserAccountRepository userRepo;
+    private final PaymentGatewayService paymentGatewayService;
     private final LiveChatBroker liveChatBroker;
 
     public OrderAndBookingService(
@@ -41,6 +43,8 @@ public class OrderAndBookingService {
             CommissionRecordRepository commissionRepo,
             PlatformSettingRepository settingRepo,
             AuditLogRepository auditLogRepo,
+            UserAccountRepository userRepo,
+            PaymentGatewayService paymentGatewayService,
             LiveChatBroker liveChatBroker
     ) {
         this.orderRepo = orderRepo;
@@ -51,6 +55,8 @@ public class OrderAndBookingService {
         this.commissionRepo = commissionRepo;
         this.settingRepo = settingRepo;
         this.auditLogRepo = auditLogRepo;
+        this.userRepo = userRepo;
+        this.paymentGatewayService = paymentGatewayService;
         this.liveChatBroker = liveChatBroker;
     }
 
@@ -223,7 +229,11 @@ public class OrderAndBookingService {
             order.setFulfillmentType(group.fulfillmentType());
             order.setDeliveryAddress(group.deliveryAddress());
             order.setPaymentMethod(req.paymentMethod());
-            order.setPaymentStatus("CASH".equalsIgnoreCase(req.paymentMethod()) ? "PENDING" : "SUCCESSFUL");
+            boolean isGatewayCheckout = "CHAPA".equalsIgnoreCase(req.paymentMethod())
+                    || "PAYO".equalsIgnoreCase(req.paymentMethod());
+            order.setPaymentStatus("CASH".equalsIgnoreCase(req.paymentMethod())
+                    ? "PENDING"
+                    : (isGatewayCheckout ? "PENDING_PAYMENT" : "SUCCESSFUL"));
             order.setEstimatedReadyMinutes(resolvedReadyMins);
             order.setEstimatedDeliveryMinutes(resolvedDeliveryMins);
             order.setReturnPolicySnapshot(returnPolicySnap);
@@ -249,6 +259,10 @@ public class OrderAndBookingService {
             String taxPeriod = YearMonth.now().toString();
             String fiscalReceipt = "ETH-MOR-" + LocalDate.now().getYear() + "-" + (100000 + new SecureRandom().nextInt(900000));
 
+            UserAccount bizOwner = userRepo.findByUid(biz.getOwnerUid()).orElse(null);
+            String platformAccLabel = paymentGatewayService.formatAccountSummary(paymentGatewayService.getPlatformCommissionAccountSnapshot());
+            String providerAccLabel = paymentGatewayService.formatAccountSummary(paymentGatewayService.buildBusinessPayoutSnapshot(biz, bizOwner));
+
             CommissionRecord cr = new CommissionRecord();
             cr.setTransactionRef(orderNumber);
             cr.setTransactionType("ORDER");
@@ -264,6 +278,14 @@ public class OrderAndBookingService {
             cr.setTaxPeriod(taxPeriod);
             cr.setCurrency("ETB");
             cr.setPaymentMethod(req.paymentMethod());
+            if (isGatewayCheckout) {
+                cr.setGateway(req.paymentMethod().toUpperCase(Locale.ROOT));
+                cr.setCommissionSettlementStatus("PENDING");
+                cr.setProviderSettlementStatus("PENDING");
+            }
+            cr.setPlatformCommissionAccount(platformAccLabel);
+            cr.setProviderPayoutAccount(providerAccLabel);
+            cr.setChapaSubaccountId(biz.getChapaSubaccountId() != null ? biz.getChapaSubaccountId() : (bizOwner != null ? bizOwner.getChapaSubaccountId() : null));
             cr.setStatus("RECORDED");
             commissionRepo.save(cr);
 
@@ -491,7 +513,11 @@ public class OrderAndBookingService {
         booking.setQuoteApproved(!listing.isQuoteBased());
         booking.setCurrency("ETB");
         booking.setPaymentMethod(req.paymentMethod());
-        booking.setPaymentStatus("CASH".equalsIgnoreCase(req.paymentMethod()) ? "PENDING" : "SUCCESSFUL");
+        boolean isGatewayBooking = "CHAPA".equalsIgnoreCase(req.paymentMethod())
+                || "PAYO".equalsIgnoreCase(req.paymentMethod());
+        booking.setPaymentStatus("CASH".equalsIgnoreCase(req.paymentMethod())
+                ? "PENDING"
+                : (isGatewayBooking ? "PENDING_PAYMENT" : "SUCCESSFUL"));
         booking.setBookingStatus(listing.isQuoteBased() ? "PENDING" : "CONFIRMED");
         booking.setNotes(req.notes() != null ? req.notes() : "");
         booking = bookingRepo.save(booking);
@@ -510,6 +536,10 @@ public class OrderAndBookingService {
         String taxPeriod = YearMonth.now().toString();
         String fiscalReceipt = "ETH-MOR-" + LocalDate.now().getYear() + "-" + (100000 + new SecureRandom().nextInt(900000));
 
+        UserAccount bizOwner = userRepo.findByUid(biz.getOwnerUid()).orElse(null);
+        String platformAccLabel = paymentGatewayService.formatAccountSummary(paymentGatewayService.getPlatformCommissionAccountSnapshot());
+        String providerAccLabel = paymentGatewayService.formatAccountSummary(paymentGatewayService.buildBusinessPayoutSnapshot(biz, bizOwner));
+
         CommissionRecord cr = new CommissionRecord();
         cr.setTransactionRef(ref);
         cr.setTransactionType("BOOKING");
@@ -525,6 +555,14 @@ public class OrderAndBookingService {
         cr.setTaxPeriod(taxPeriod);
         cr.setCurrency("ETB");
         cr.setPaymentMethod(req.paymentMethod());
+        if (isGatewayBooking) {
+            cr.setGateway(req.paymentMethod().toUpperCase(Locale.ROOT));
+            cr.setCommissionSettlementStatus("PENDING");
+            cr.setProviderSettlementStatus("PENDING");
+        }
+        cr.setPlatformCommissionAccount(platformAccLabel);
+        cr.setProviderPayoutAccount(providerAccLabel);
+        cr.setChapaSubaccountId(biz.getChapaSubaccountId() != null ? biz.getChapaSubaccountId() : (bizOwner != null ? bizOwner.getChapaSubaccountId() : null));
         cr.setStatus("RECORDED");
         commissionRepo.save(cr);
 

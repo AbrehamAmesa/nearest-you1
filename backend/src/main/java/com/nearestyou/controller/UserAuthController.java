@@ -2,6 +2,7 @@ package com.nearestyou.controller;
 
 import com.nearestyou.dto.NearestYouDtos.ChangePasswordRequest;
 import com.nearestyou.dto.NearestYouDtos.LoginRequest;
+import com.nearestyou.dto.NearestYouDtos.PayoutAccountRequest;
 import com.nearestyou.dto.NearestYouDtos.RegisterRequest;
 import com.nearestyou.dto.NearestYouDtos.SyncPasswordRequest;
 import com.nearestyou.dto.NearestYouDtos.UpdateProfileRequest;
@@ -9,6 +10,7 @@ import com.nearestyou.entity.UserAccount;
 import com.nearestyou.security.LocalAuthTokenService;
 import com.nearestyou.security.UserPrincipal;
 import com.nearestyou.service.EngagementService;
+import com.nearestyou.service.PaymentGatewayService;
 import com.nearestyou.service.UserSyncService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -24,15 +26,18 @@ public class UserAuthController {
     private final UserSyncService userSyncService;
     private final EngagementService engagementService;
     private final LocalAuthTokenService localAuthTokenService;
+    private final PaymentGatewayService paymentGatewayService;
 
     public UserAuthController(
             UserSyncService userSyncService,
             EngagementService engagementService,
-            LocalAuthTokenService localAuthTokenService
+            LocalAuthTokenService localAuthTokenService,
+            PaymentGatewayService paymentGatewayService
     ) {
         this.userSyncService = userSyncService;
         this.engagementService = engagementService;
         this.localAuthTokenService = localAuthTokenService;
+        this.paymentGatewayService = paymentGatewayService;
     }
 
     @PostMapping("/auth/register")
@@ -95,5 +100,14 @@ public class UserAuthController {
     @GetMapping("/me/workspace")
     public Map<String, Object> getWorkspace(@AuthenticationPrincipal UserPrincipal principal) {
         return engagementService.getUserWorkspace(principal.uid());
+    }
+
+    @PutMapping("/me/payout-account")
+    public Map<String, Object> updatePersonalPayoutAccount(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestBody PayoutAccountRequest req
+    ) {
+        UserAccount updated = paymentGatewayService.updatePersonalPayoutAccount(principal, req);
+        return Map.of("user", updated);
     }
 }

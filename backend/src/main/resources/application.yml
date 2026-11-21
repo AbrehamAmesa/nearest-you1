@@ -34,6 +34,17 @@ nearestyou:
     api-key: ${GOOGLE_MAPS_API_KEY:}
   gemini:
     api-key: ${GEMINI_API_KEY:}
+  payments:
+    public-app-base-url: ${PUBLIC_APP_BASE_URL:http://localhost:3000}
+    chapa:
+      base-url: ${CHAPA_BASE_URL:https://api.chapa.co/v1}
+      secret-key: ${CHAPA_SECRET_KEY:}
+      webhook-secret: ${CHAPA_WEBHOOK_SECRET:}
+    payo:
+      base-url: ${PAYO_BASE_URL:https://payment.et}
+      api-key: ${PAYO_API_KEY:}
+      merchant-id: ${PAYO_MERCHANT_ID:}
+      webhook-secret: ${PAYO_WEBHOOK_SECRET:}
 
 springdoc:
   swagger-ui:

@@ -33,6 +33,7 @@ public class BusinessAndListingService {
     private final CategoryDocumentRequirementRepository requirementRepo;
     private final AuditLogRepository auditLogRepo;
     private final ServiceContractRepository contractRepo;
+    private final PaymentTransactionRepository paymentRepo;
     private final MandatoryPricingValidator pricingValidator;
     private final GeoDistanceService geoDistanceService;
     private final UserSyncService userSyncService;
@@ -51,6 +52,7 @@ public class BusinessAndListingService {
             CategoryDocumentRequirementRepository requirementRepo,
             AuditLogRepository auditLogRepo,
             ServiceContractRepository contractRepo,
+            PaymentTransactionRepository paymentRepo,
             MandatoryPricingValidator pricingValidator,
             GeoDistanceService geoDistanceService,
             UserSyncService userSyncService
@@ -68,6 +70,7 @@ public class BusinessAndListingService {
         this.requirementRepo = requirementRepo;
         this.auditLogRepo = auditLogRepo;
         this.contractRepo = contractRepo;
+        this.paymentRepo = paymentRepo;
         this.pricingValidator = pricingValidator;
         this.geoDistanceService = geoDistanceService;
         this.userSyncService = userSyncService;
@@ -90,6 +93,11 @@ public class BusinessAndListingService {
         List<CommissionRecord> scopedCommissions = bizIds.isEmpty() ? List.of() : commissionRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds);
         List<Review> scopedReviews = bizIds.isEmpty() ? List.of() : reviewRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds);
         List<ServiceContract> scopedContracts = bizIds.isEmpty() ? List.of() : contractRepo.findByBusinessIdInOrderByUpdatedAtDesc(bizIds);
+        List<PaymentTransaction> scopedPayments = principal.isAdmin()
+                ? paymentRepo.findAllByOrderByCreatedAtDesc()
+                : (bizIds.isEmpty()
+                        ? paymentRepo.findByProviderUidOrderByCreatedAtDesc(principal.uid())
+                        : paymentRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds));
         ProviderRegistration reg = providerRepo.findFirstByUserUidOrderByUpdatedAtDesc(principal.uid()).orElse(null);
 
         Map<String, Object> out = new LinkedHashMap<>();
@@ -99,6 +107,7 @@ public class BusinessAndListingService {
         out.put("contracts", scopedContracts);
         out.put("applications", scopedApps);
         out.put("commissions", scopedCommissions);
+        out.put("paymentTransactions", scopedPayments);
         out.put("reviews", scopedReviews);
         out.put("providerRegistration", reg);
         out.put("documentRequirements", requirementRepo.findAllByOrderByCategoryIdAscIdAsc());

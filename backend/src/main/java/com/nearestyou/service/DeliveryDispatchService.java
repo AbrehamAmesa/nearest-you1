@@ -28,6 +28,8 @@ public class DeliveryDispatchService {
     private final PlatformSettingRepository settingRepo;
     private final ProviderRegistrationRepository providerRepo;
     private final AuditLogRepository auditLogRepo;
+    private final UserAccountRepository userRepo;
+    private final PaymentGatewayService paymentGatewayService;
     private final LiveChatBroker liveChatBroker;
 
     public DeliveryDispatchService(
@@ -36,6 +38,8 @@ public class DeliveryDispatchService {
             PlatformSettingRepository settingRepo,
             ProviderRegistrationRepository providerRepo,
             AuditLogRepository auditLogRepo,
+            UserAccountRepository userRepo,
+            PaymentGatewayService paymentGatewayService,
             LiveChatBroker liveChatBroker
     ) {
         this.deliveryRepo = deliveryRepo;
@@ -43,6 +47,8 @@ public class DeliveryDispatchService {
         this.settingRepo = settingRepo;
         this.providerRepo = providerRepo;
         this.auditLogRepo = auditLogRepo;
+        this.userRepo = userRepo;
+        this.paymentGatewayService = paymentGatewayService;
         this.liveChatBroker = liveChatBroker;
     }
 
@@ -76,7 +82,10 @@ public class DeliveryDispatchService {
             }
             if (principal.isAdmin() || d.getCustomerUid().equals(principal.uid()) || principal.uid().equals(d.getDriverUid())) {
                 scoped.add(sanitizeForViewer(d, principal, dist));
-            } else if (isVerifiedPartner && "REQUESTED".equalsIgnoreCase(d.getStatus()) && d.getDriverUid() == null) {
+            } else if (isVerifiedPartner
+                    && "REQUESTED".equalsIgnoreCase(d.getStatus())
+                    && d.getDriverUid() == null
+                    && !"AWAITING_PAYMENT".equalsIgnoreCase(d.getEscrowStatus())) {
                 if (dist != null && dist <= radiusKm) {
                     scoped.add(sanitizeForViewer(d, principal, dist));
                 }
@@ -212,7 +221,11 @@ public class DeliveryDispatchService {
         String trackingCode = "NY-" + (isRide ? "RID" : "DEL") + "-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(Locale.ROOT);
         String pickupOtp = String.valueOf(100000 + OTP_RNG.nextInt(900000));
         String deliveryOtp = String.valueOf(100000 + OTP_RNG.nextInt(900000));
-        String escrowStatus = "CASH".equalsIgnoreCase(req.paymentMethod()) ? "COD_TRACKED" : "HELD_IN_ESCROW";
+        boolean isGatewayCheckout = "CHAPA".equalsIgnoreCase(req.paymentMethod())
+                || "PAYO".equalsIgnoreCase(req.paymentMethod());
+        String escrowStatus = "CASH".equalsIgnoreCase(req.paymentMethod())
+                ? "COD_TRACKED"
+                : (isGatewayCheckout ? "AWAITING_PAYMENT" : "HELD_IN_ESCROW");
 
         DeliveryRequest d = new DeliveryRequest();
         d.setTrackingCode(trackingCode);
@@ -252,6 +265,9 @@ public class DeliveryDispatchService {
         BigDecimal whtAmt = taxableAmount.compareTo(new BigDecimal("3000.00")) >= 0
                 ? taxableAmount.multiply(new BigDecimal("0.02")).setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
 
+        String platformAccLabel = paymentGatewayService.formatAccountSummary(paymentGatewayService.getPlatformCommissionAccountSnapshot());
+        String driverPlaceholderLabel = paymentGatewayService.formatAccountSummary(paymentGatewayService.buildDriverPayoutSnapshot(null));
+
         CommissionRecord cr = new CommissionRecord();
         cr.setTransactionRef(trackingCode);
         cr.setTransactionType(d.getRequestType());
@@ -267,6 +283,13 @@ public class DeliveryDispatchService {
         cr.setTaxPeriod(YearMonth.now().toString());
         cr.setCurrency("ETB");
         cr.setPaymentMethod(req.paymentMethod());
+        if (isGatewayCheckout) {
+            cr.setGateway(req.paymentMethod().toUpperCase(Locale.ROOT));
+            cr.setCommissionSettlementStatus("PENDING");
+            cr.setProviderSettlementStatus("PENDING");
+        }
+        cr.setPlatformCommissionAccount(platformAccLabel);
+        cr.setProviderPayoutAccount(driverPlaceholderLabel);
         cr.setStatus("RECORDED");
         commissionRepo.save(cr);
 
@@ -307,6 +330,10 @@ public class DeliveryDispatchService {
                 throw new ApiException(HttpStatus.FORBIDDEN,
                         "Registration Required: Only verified registered partners or drivers can accept jobs.");
             }
+            if ("AWAITING_PAYMENT".equalsIgnoreCase(existing.getEscrowStatus())) {
+                throw new ApiException(HttpStatus.BAD_REQUEST,
+                        "Escrow payment via Chapa or Payo must be completed by the requester before dispatch claiming.");
+            }
             if (!principal.isAdmin() && principal.uid().equals(existing.getCustomerUid())) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot accept your own delivery request.");
             }
@@ -328,6 +355,14 @@ public class DeliveryDispatchService {
                 throw new ApiException(HttpStatus.CONFLICT, "Conflict Prevented: Another delivery partner already claimed this job.");
             }
             DeliveryRequest claimed = deliveryRepo.findById(id).orElseThrow();
+            userRepo.findByUid(principal.uid()).ifPresent(driverAccount -> {
+                String driverAccLabel = paymentGatewayService.formatAccountSummary(paymentGatewayService.buildDriverPayoutSnapshot(driverAccount));
+                commissionRepo.findByTransactionRef(claimed.getTrackingCode()).ifPresent(cr -> {
+                    cr.setProviderPayoutAccount(driverAccLabel);
+                    cr.setChapaSubaccountId(driverAccount.getChapaSubaccountId());
+                    commissionRepo.save(cr);
+                });
+            });
             AuditLog log = new AuditLog();
             log.setActorUid(principal.uid());
             log.setActorEmail(principal.email());

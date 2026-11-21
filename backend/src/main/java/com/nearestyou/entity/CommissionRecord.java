@@ -57,6 +57,27 @@ public class CommissionRecord {
     @Column(nullable = false)
     private String status = "RECORDED";
 
+    @Column(name = "gateway")
+    private String gateway;
+
+    @Column(name = "gateway_tx_ref")
+    private String gatewayTxRef;
+
+    @Column(name = "platform_commission_account")
+    private String platformCommissionAccount;
+
+    @Column(name = "provider_payout_account")
+    private String providerPayoutAccount;
+
+    @Column(name = "chapa_subaccount_id")
+    private String chapaSubaccountId;
+
+    @Column(name = "commission_settlement_status")
+    private String commissionSettlementStatus;
+
+    @Column(name = "provider_settlement_status")
+    private String providerSettlementStatus;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -107,6 +128,27 @@ public class CommissionRecord {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public String getGateway() { return gateway; }
+    public void setGateway(String gateway) { this.gateway = gateway; }
+
+    public String getGatewayTxRef() { return gatewayTxRef; }
+    public void setGatewayTxRef(String gatewayTxRef) { this.gatewayTxRef = gatewayTxRef; }
+
+    public String getPlatformCommissionAccount() { return platformCommissionAccount; }
+    public void setPlatformCommissionAccount(String platformCommissionAccount) { this.platformCommissionAccount = platformCommissionAccount; }
+
+    public String getProviderPayoutAccount() { return providerPayoutAccount; }
+    public void setProviderPayoutAccount(String providerPayoutAccount) { this.providerPayoutAccount = providerPayoutAccount; }
+
+    public String getChapaSubaccountId() { return chapaSubaccountId; }
+    public void setChapaSubaccountId(String chapaSubaccountId) { this.chapaSubaccountId = chapaSubaccountId; }
+
+    public String getCommissionSettlementStatus() { return commissionSettlementStatus; }
+    public void setCommissionSettlementStatus(String commissionSettlementStatus) { this.commissionSettlementStatus = commissionSettlementStatus; }
+
+    public String getProviderSettlementStatus() { return providerSettlementStatus; }
+    public void setProviderSettlementStatus(String providerSettlementStatus) { this.providerSettlementStatus = providerSettlementStatus; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
