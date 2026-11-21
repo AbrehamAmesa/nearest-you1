@@ -944,8 +944,11 @@ public class PaymentGatewayService {
         payload.put("return_url", returnUrl);
 
         Map<String, Object> custom = new LinkedHashMap<>();
-        custom.put("title", "Nearest You · " + tx.getReferenceCode());
-        custom.put("description", "Split checkout: net sales to provider account, platform fee to single commission account.");
+        custom.put("title", sanitizeChapaCustomizationText("Nearest You", 16, "Nearest You"));
+        custom.put(
+                "description",
+                sanitizeChapaCustomizationText("Nearest You " + tx.getReferenceCode(), 50, "Nearest You checkout")
+        );
         payload.put("customization", custom);
 
         if (tx.getChapaSubaccountId() != null
@@ -1253,6 +1256,18 @@ public class PaymentGatewayService {
         } catch (Exception ex) {
             return false;
         }
+    }
+
+    private String sanitizeChapaCustomizationText(String raw, int maxLen, String fallback) {
+        String source = (raw != null && !raw.isBlank()) ? raw : fallback;
+        String cleaned = source
+                .replaceAll("[^A-Za-z0-9\\-_ .]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (cleaned.isEmpty()) {
+            cleaned = fallback;
+        }
+        return cleaned.length() > maxLen ? cleaned.substring(0, maxLen).trim() : cleaned;
     }
 
     private String trimOrNull(String val) {
