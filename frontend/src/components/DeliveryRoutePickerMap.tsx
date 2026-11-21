@@ -1,9 +1,10 @@
 import L from 'leaflet';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Crosshair, MapPin, Navigation, Route as RouteIcon, Search } from 'lucide-react';
+import { catalogApi, mapsApi } from '../api/index.ts';
+import type { KnownLocationRecord } from '../types/nearestyou.ts';
 import { calculateDistanceKm } from '../utils/geo.ts';
 import { TRANSLATIONS, type AppLanguage } from '../utils/i18n.ts';
-import { mapsApi } from '../api/index.ts';
 
 export interface SelectedPlacePoint {
   label: string;
@@ -23,6 +24,7 @@ interface SearchPlaceResult {
 
 interface DeliveryRoutePickerMapProps {
   language: AppLanguage;
+  knownLocations?: KnownLocationRecord[];
   activePinMode: 'PICKUP' | 'DESTINATION';
   onChangePinMode: (mode: 'PICKUP' | 'DESTINATION') => void;
   pickup: SelectedPlacePoint | null;
@@ -43,8 +45,19 @@ function createRoutePin(bg: string, border: string, label: string) {
   });
 }
 
+function formatKnownLocationLabel(kl: KnownLocationRecord): string {
+  if (kl.subCity && kl.subCity.toLowerCase() !== 'center' && !kl.name.toLowerCase().includes(kl.subCity.toLowerCase())) {
+    return `${kl.name} (${kl.subCity}, ${kl.city})`;
+  }
+  if (kl.city && !kl.name.toLowerCase().includes(kl.city.toLowerCase())) {
+    return `${kl.name} (${kl.city})`;
+  }
+  return kl.name;
+}
+
 export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
   language,
+  knownLocations: propKnownLocations,
   activePinMode,
   onChangePinMode,
   pickup,
@@ -70,7 +83,7 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
   const onRouteCalcRef = useRef(onRouteCalculated);
   onRouteCalcRef.current = onRouteCalculated;
 
-  const [knownPlaces, setKnownPlaces] = useState<SelectedPlacePoint[]>([]);
+  const [fetchedKnownLocations, setFetchedKnownLocations] = useState<KnownLocationRecord[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
 
   const [pickupQuery, setPickupQuery] = useState('');
@@ -82,21 +95,19 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
   const [routeNotice, setRouteNotice] = useState<string | null>(null);
   const [routeCoords, setRouteCoords] = useState<Array<[number, number]>>([]);
 
-  // Load curated Addis Ababa places from free /api/v1/maps/search endpoint
+  // Load 200 registered known locations from backend if not already passed via catalog prop
   useEffect(() => {
+    if (propKnownLocations && propKnownLocations.length > 0) {
+      return;
+    }
     let active = true;
     setLoadingPlaces(true);
-    mapsApi.searchPlaces('')
-      .then((response) => response.data)
-      .then((data) => {
+    catalogApi
+      .getLocations()
+      .then((res) => {
         if (!active) return;
-        const pts: SelectedPlacePoint[] = (data.results || []).map((r: SearchPlaceResult) => ({
-          label: r.displayName,
-          lat: Number(r.lat),
-          lng: Number(r.lng),
-          placeId: r.placeId,
-        }));
-        setKnownPlaces(pts);
+        const rows = Array.isArray(res.data) ? (res.data as KnownLocationRecord[]) : [];
+        setFetchedKnownLocations(rows);
       })
       .catch(() => {})
       .finally(() => {
@@ -105,9 +116,73 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
     return () => {
       active = false;
     };
-  }, []);
+  }, [propKnownLocations]);
 
-  // Debounced Nominatim + Curated Search for Pickup
+  const knownLocations = useMemo(
+    () =>
+      propKnownLocations && propKnownLocations.length > 0
+        ? propKnownLocations
+        : fetchedKnownLocations,
+    [propKnownLocations, fetchedKnownLocations]
+  );
+
+  const groupedKnownLocations = useMemo(() => {
+    const groups = new Map<string, KnownLocationRecord[]>();
+    for (const kl of knownLocations) {
+      const groupKey = kl.subCity && kl.subCity !== 'Center' ? `${kl.city} · ${kl.subCity}` : kl.city;
+      const list = groups.get(groupKey);
+      if (list) list.push(kl);
+      else groups.set(groupKey, [kl]);
+    }
+    return Array.from(groups.entries());
+  }, [knownLocations]);
+
+  const knownByCode = useMemo(() => {
+    const map = new Map<string, KnownLocationRecord>();
+    for (const kl of knownLocations) {
+      map.set(kl.code, kl);
+    }
+    return map;
+  }, [knownLocations]);
+
+  const searchKnownAndMap = async (q: string): Promise<SearchPlaceResult[]> => {
+    const needle = q.trim().toLowerCase();
+    const localMatches: SearchPlaceResult[] = knownLocations
+      .filter(
+        (kl) =>
+          kl.name.toLowerCase().includes(needle) ||
+          (kl.nameAm || '').toLowerCase().includes(needle) ||
+          kl.subCity.toLowerCase().includes(needle) ||
+          kl.city.toLowerCase().includes(needle) ||
+          kl.code.toLowerCase().includes(needle)
+      )
+      .slice(0, 8)
+      .map((kl) => ({
+        placeId: `known:${kl.code}`,
+        displayName: formatKnownLocationLabel(kl),
+        subCity: kl.subCity,
+        lat: Number(kl.latitude),
+        lng: Number(kl.longitude),
+        source: 'KNOWN_LOCATION',
+      }));
+
+    try {
+      const response = await mapsApi.searchPlaces(q);
+      const remote: SearchPlaceResult[] = response.data?.results || [];
+      const seenLabels = new Set(localMatches.map((m) => m.displayName.toLowerCase()));
+      const merged = [...localMatches];
+      for (const r of remote) {
+        if (!seenLabels.has(r.displayName.toLowerCase())) {
+          merged.push(r);
+        }
+      }
+      return merged.slice(0, 10);
+    } catch {
+      return localMatches;
+    }
+  };
+
+  // Debounced search for Pickup
   useEffect(() => {
     const q = pickupQuery.trim();
     if (q.length < 2) {
@@ -116,22 +191,21 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      mapsApi.searchPlaces(q)
-        .then((response) => response.data)
-        .then((data) => {
-          if (!cancelled) setPickupSuggestions(data.results || []);
+      searchKnownAndMap(q)
+        .then((results) => {
+          if (!cancelled) setPickupSuggestions(results);
         })
         .catch(() => {
           if (!cancelled) setPickupSuggestions([]);
         });
-    }, 280);
+    }, 240);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [pickupQuery]);
+  }, [pickupQuery, knownLocations]);
 
-  // Debounced Nominatim + Curated Search for Destination
+  // Debounced search for Destination
   useEffect(() => {
     const q = destQuery.trim();
     if (q.length < 2) {
@@ -140,20 +214,19 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      mapsApi.searchPlaces(q)
-        .then((response) => response.data)
-        .then((data) => {
-          if (!cancelled) setDestSuggestions(data.results || []);
+      searchKnownAndMap(q)
+        .then((results) => {
+          if (!cancelled) setDestSuggestions(results);
         })
         .catch(() => {
           if (!cancelled) setDestSuggestions([]);
         });
-    }, 280);
+    }, 240);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [destQuery]);
+  }, [destQuery, knownLocations]);
 
   // Initialize Leaflet Map once
   useEffect(() => {
@@ -219,7 +292,8 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
     let cancelled = false;
     setComputingRoute(true);
 
-    mapsApi.getRoute(pickup.lat, pickup.lng, destination.lat, destination.lng)
+    mapsApi
+      .getRoute(pickup.lat, pickup.lng, destination.lat, destination.lng)
       .then((response) => response.data)
       .then((data) => {
         if (cancelled) return;
@@ -228,8 +302,8 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
           const geom = Array.isArray(data.geometry) ? data.geometry : [];
           setRouteCoords(geom);
           onRouteCalcRef.current(
-            Number(data.distanceKm),
-            data.durationMin != null ? Number(data.durationMin) : null,
+            Number(Number(data.distanceKm).toFixed(2)),
+            data.durationMin != null ? Math.round(Number(data.durationMin)) : null,
             data.source === 'OSRM' ? 'OSRM' : 'HAVERSINE'
           );
           if (data.source !== 'OSRM') {
@@ -327,68 +401,89 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
     mapRef.current?.panTo([pt.lat, pt.lng]);
   };
 
-  const handleKnownPlaceDropdown = (value: string, target: 'PICKUP' | 'DESTINATION') => {
-    const idx = Number(value);
-    const chosen = knownPlaces[idx];
+  const handleKnownPlaceDropdown = (code: string, target: 'PICKUP' | 'DESTINATION') => {
+    const chosen = knownByCode.get(code);
     if (!chosen) return;
+    const pt: SelectedPlacePoint = {
+      label: formatKnownLocationLabel(chosen),
+      lat: Number(Number(chosen.latitude).toFixed(6)),
+      lng: Number(Number(chosen.longitude).toFixed(6)),
+      placeId: `known:${chosen.code}`,
+    };
     if (target === 'PICKUP') {
-      onSelectPickup(chosen);
+      onSelectPickup(pt);
+      onChangePinMode('DESTINATION');
     } else {
-      onSelectDestination(chosen);
+      onSelectDestination(pt);
     }
-    mapRef.current?.panTo([chosen.lat, chosen.lng]);
+    mapRef.current?.panTo([pt.lat, pt.lng]);
   };
 
+  const selectedPickupCode =
+    pickup?.placeId && pickup.placeId.startsWith('known:')
+      ? pickup.placeId.slice('known:'.length)
+      : '';
+  const selectedDestCode =
+    destination?.placeId && destination.placeId.startsWith('known:')
+      ? destination.placeId.slice('known:'.length)
+      : '';
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
+    <div className="min-w-0 w-full space-y-4">
+      <div className="grid gap-3.5 sm:grid-cols-2 sm:gap-4">
         {/* START / PICKUP */}
-        <div className="space-y-2 rounded-xl border border-[#176B52]/25 bg-[#F4F6F5]/60 p-3.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#176B52]">
-              <MapPin className="h-3.5 w-3.5" />
-              {t.pickupTitle}
+        <div className="min-w-0 space-y-2 rounded-xl border border-[#176B52]/25 bg-[#F4F6F5]/60 p-3 sm:p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-bold text-[#176B52]">
+              <MapPin className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{t.pickupTitle}</span>
             </span>
             <button
               type="button"
               onClick={() => onChangePinMode('PICKUP')}
-              className={`inline-flex min-h-[36px] items-center gap-1 rounded px-2.5 py-1 text-[11px] font-semibold ${
+              className={`inline-flex min-h-[36px] shrink-0 items-center gap-1 rounded px-2.5 py-1 text-[11px] font-semibold ${
                 activePinMode === 'PICKUP'
                   ? 'bg-[#176B52] text-white'
                   : 'border border-[#172B3A]/15 bg-white text-[#172B3A]/75'
               }`}
             >
-              <Crosshair className="h-3 w-3" />
-              {t.pinOnMap}
+              <Crosshair className="h-3 w-3 shrink-0" />
+              <span>{t.pinOnMap}</span>
             </button>
           </div>
 
           <select
             aria-label={t.pickupTitle}
-            defaultValue=""
+            value={selectedPickupCode}
             onChange={(e) => {
               if (e.target.value !== '') handleKnownPlaceDropdown(e.target.value, 'PICKUP');
             }}
-            className="h-11 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 text-xs font-medium text-[#172B3A]"
+            className="h-11 w-full min-w-0 max-w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 text-xs font-medium text-[#172B3A]"
           >
-            <option value="" disabled>
-              {loadingPlaces ? '...' : `${t.selectFromMapPlaces} (${knownPlaces.length})`}
+            <option value="">
+              {loadingPlaces
+                ? 'Loading known locations...'
+                : `Select Known Location (${knownLocations.length})`}
             </option>
-            {knownPlaces.map((kp, i) => (
-              <option key={`p-${i}-${kp.placeId || kp.label}`} value={String(i)}>
-                {kp.label}
-              </option>
+            {groupedKnownLocations.map(([groupLabel, items]) => (
+              <optgroup key={`p-grp-${groupLabel}`} label={groupLabel}>
+                {items.map((kl) => (
+                  <option key={`p-${kl.code}`} value={kl.code}>
+                    {kl.name} ({Number(kl.latitude).toFixed(4)}, {Number(kl.longitude).toFixed(4)})
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
 
-          <div className="relative">
+          <div className="relative min-w-0">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#172B3A]/45" />
             <input
               type="text"
               value={pickupQuery}
               onChange={(e) => setPickupQuery(e.target.value)}
               placeholder={t.searchMapPlaces}
-              className="h-10 w-full rounded-lg border border-[#172B3A]/15 bg-white pl-8 pr-2.5 text-xs"
+              className="h-10 w-full min-w-0 rounded-lg border border-[#172B3A]/15 bg-white pl-8 pr-2.5 text-xs"
             />
             {pickupSuggestions.length > 0 && (
               <ul className="absolute z-[500] mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-[#172B3A]/15 bg-white shadow-lg">
@@ -397,7 +492,7 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
                     <button
                       type="button"
                       onClick={() => handleSelectSuggestion(s, 'PICKUP')}
-                      className="min-h-[40px] w-full px-3 py-2 text-left text-xs hover:bg-[#F4F6F5]"
+                      className="min-h-[40px] w-full break-words px-3 py-2 text-left text-xs hover:bg-[#F4F6F5]"
                     >
                       {s.displayName}
                     </button>
@@ -408,59 +503,65 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
           </div>
 
           {pickup && (
-            <p className="truncate font-mono text-[11px] font-semibold text-[#172B3A]">
-              ✓ {pickup.label} ({pickup.lat.toFixed(4)}, {pickup.lng.toFixed(4)})
+            <p className="break-words font-mono text-[11px] font-semibold text-[#172B3A]">
+              ✓ {pickup.label} ({pickup.lat.toFixed(5)}, {pickup.lng.toFixed(5)})
             </p>
           )}
         </div>
 
         {/* DESTINATION */}
-        <div className="space-y-2 rounded-xl border border-[#F4A62A]/45 bg-[#F4F6F5]/60 p-3.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#172B3A]">
-              <Navigation className="h-3.5 w-3.5 text-[#F4A62A]" />
-              {t.destinationTitle}
+        <div className="min-w-0 space-y-2 rounded-xl border border-[#F4A62A]/45 bg-[#F4F6F5]/60 p-3 sm:p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-bold text-[#172B3A]">
+              <Navigation className="h-3.5 w-3.5 shrink-0 text-[#F4A62A]" />
+              <span className="truncate">{t.destinationTitle}</span>
             </span>
             <button
               type="button"
               onClick={() => onChangePinMode('DESTINATION')}
-              className={`inline-flex min-h-[36px] items-center gap-1 rounded px-2.5 py-1 text-[11px] font-semibold ${
+              className={`inline-flex min-h-[36px] shrink-0 items-center gap-1 rounded px-2.5 py-1 text-[11px] font-semibold ${
                 activePinMode === 'DESTINATION'
                   ? 'bg-[#F4A62A] text-[#172B3A]'
                   : 'border border-[#172B3A]/15 bg-white text-[#172B3A]/75'
               }`}
             >
-              <Crosshair className="h-3 w-3" />
-              {t.pinOnMap}
+              <Crosshair className="h-3 w-3 shrink-0" />
+              <span>{t.pinOnMap}</span>
             </button>
           </div>
 
           <select
             aria-label={t.destinationTitle}
-            defaultValue=""
+            value={selectedDestCode}
             onChange={(e) => {
               if (e.target.value !== '') handleKnownPlaceDropdown(e.target.value, 'DESTINATION');
             }}
-            className="h-11 w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 text-xs font-medium text-[#172B3A]"
+            className="h-11 w-full min-w-0 max-w-full rounded-lg border border-[#172B3A]/15 bg-white px-2.5 text-xs font-medium text-[#172B3A]"
           >
-            <option value="" disabled>
-              {loadingPlaces ? '...' : `${t.selectFromMapPlaces} (${knownPlaces.length})`}
+            <option value="">
+              {loadingPlaces
+                ? 'Loading known locations...'
+                : `Select Known Location (${knownLocations.length})`}
             </option>
-            {knownPlaces.map((kp, i) => (
-              <option key={`d-${i}-${kp.placeId || kp.label}`} value={String(i)}>
-                {kp.label}
-              </option>
+            {groupedKnownLocations.map(([groupLabel, items]) => (
+              <optgroup key={`d-grp-${groupLabel}`} label={groupLabel}>
+                {items.map((kl) => (
+                  <option key={`d-${kl.code}`} value={kl.code}>
+                    {kl.name} ({Number(kl.latitude).toFixed(4)}, {Number(kl.longitude).toFixed(4)})
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
 
-          <div className="relative">
+          <div className="relative min-w-0">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#172B3A]/45" />
             <input
               type="text"
               value={destQuery}
               onChange={(e) => setDestQuery(e.target.value)}
               placeholder={t.searchMapPlaces}
-              className="h-10 w-full rounded-lg border border-[#172B3A]/15 bg-white pl-8 pr-2.5 text-xs"
+              className="h-10 w-full min-w-0 rounded-lg border border-[#172B3A]/15 bg-white pl-8 pr-2.5 text-xs"
             />
             {destSuggestions.length > 0 && (
               <ul className="absolute z-[500] mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-[#172B3A]/15 bg-white shadow-lg">
@@ -469,7 +570,7 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
                     <button
                       type="button"
                       onClick={() => handleSelectSuggestion(s, 'DESTINATION')}
-                      className="min-h-[40px] w-full px-3 py-2 text-left text-xs hover:bg-[#F4F6F5]"
+                      className="min-h-[40px] w-full break-words px-3 py-2 text-left text-xs hover:bg-[#F4F6F5]"
                     >
                       {s.displayName}
                     </button>
@@ -480,28 +581,28 @@ export const DeliveryRoutePickerMap: React.FC<DeliveryRoutePickerMapProps> = ({
           </div>
 
           {destination && (
-            <p className="truncate font-mono text-[11px] font-semibold text-[#172B3A]">
-              ✓ {destination.label} ({destination.lat.toFixed(4)}, {destination.lng.toFixed(4)})
+            <p className="break-words font-mono text-[11px] font-semibold text-[#172B3A]">
+              ✓ {destination.label} ({destination.lat.toFixed(5)}, {destination.lng.toFixed(5)})
             </p>
           )}
         </div>
       </div>
 
       {/* Interactive Free OpenStreetMap + Leaflet Canvas */}
-      <div className="relative h-[280px] w-full overflow-hidden rounded-xl border border-[#172B3A]/15 bg-[#E6EAE8] sm:h-[340px]">
+      <div className="relative h-[230px] w-full min-w-0 overflow-hidden rounded-xl border border-[#172B3A]/15 bg-[#E6EAE8] sm:h-[340px]">
         <div ref={containerRef} className="h-full w-full" />
 
-        <div className="pointer-events-none absolute left-3 top-3 z-[400] rounded-lg bg-white/95 px-3 py-1.5 text-[11px] font-semibold text-[#172B3A] shadow">
+        <div className="pointer-events-none absolute right-2.5 top-2.5 z-[400] max-w-[calc(100%-3.75rem)] truncate rounded-lg bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-[#172B3A] shadow">
           {activePinMode === 'PICKUP'
-            ? `📍 ${t.pinOnMap}: ${t.pickupTitle}`
-            : `🏁 ${t.pinOnMap}: ${t.destinationTitle}`}
+            ? `Pin: ${t.pickupTitle}`
+            : `Pin: ${t.destinationTitle}`}
         </div>
       </div>
 
       {computingRoute && (
         <p className="flex items-center gap-1.5 text-xs font-medium text-[#176B52]">
-          <RouteIcon className="h-3.5 w-3.5 animate-pulse" />
-          {t.calculatingRoute}
+          <RouteIcon className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+          <span>{t.calculatingRoute}</span>
         </p>
       )}
       {routeNotice && (

@@ -1,4 +1,4 @@
-import { commerceApi } from '../api/index.ts';
+import { catalogApi, commerceApi } from '../api/index.ts';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   Truck,
 } from 'lucide-react';
-import type { DeliveryRecord, PlatformPolicy } from '../types/nearestyou.ts';
+import type { DeliveryRecord, KnownLocationRecord, PlatformPolicy } from '../types/nearestyou.ts';
 import { ADDIS_SUB_CITIES, formatEtb } from '../utils/geo.ts';
 import { TRANSLATIONS, type AppLanguage } from '../utils/i18n.ts';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -26,6 +26,7 @@ import { LiveDriverTrackerMap } from './ServiceMap.tsx';
 
 interface DeliveryTransportViewProps {
   policy: PlatformPolicy;
+  knownLocations?: KnownLocationRecord[];
   language: AppLanguage;
   onNotify: (msg: string) => void;
 }
@@ -40,11 +41,47 @@ const CONFLICT_CATEGORIES = [
 
 export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
   policy,
+  knownLocations: propKnownLocations,
   language,
   onNotify,
 }) => {
   const t = TRANSLATIONS[language].delivery;
   const { firebaseUser, dbUser, isAdmin, hasRole, openAuthModal, authFetch } = useAuth();
+  const [fetchedKnownLocations, setFetchedKnownLocations] = useState<KnownLocationRecord[]>([]);
+
+  useEffect(() => {
+    if (propKnownLocations && propKnownLocations.length > 0) return;
+    let active = true;
+    catalogApi
+      .getLocations()
+      .then((res) => {
+        if (!active) return;
+        setFetchedKnownLocations(Array.isArray(res.data) ? (res.data as KnownLocationRecord[]) : []);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [propKnownLocations]);
+
+  const resolvedKnownLocations = useMemo(
+    () =>
+      propKnownLocations && propKnownLocations.length > 0
+        ? propKnownLocations
+        : fetchedKnownLocations,
+    [propKnownLocations, fetchedKnownLocations]
+  );
+
+  const groupedKnownLocations = useMemo(() => {
+    const groups = new Map<string, KnownLocationRecord[]>();
+    for (const kl of resolvedKnownLocations) {
+      const groupKey = kl.subCity && kl.subCity !== 'Center' ? `${kl.city} · ${kl.subCity}` : kl.city;
+      const list = groups.get(groupKey);
+      if (list) list.push(kl);
+      else groups.set(groupKey, [kl]);
+    }
+    return Array.from(groups.entries());
+  }, [resolvedKnownLocations]);
 
   const [mode, setMode] = useState<'CUSTOMER' | 'TRACK' | 'PARTNER'>('CUSTOMER');
   const [requestType, setRequestType] = useState<'DELIVERY' | 'RIDE'>('DELIVERY');
@@ -458,18 +495,18 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
   }, [queue, dbUser]);
 
   return (
-    <div className="mx-auto max-w-[1440px] space-y-6 sm:space-y-8 px-4 sm:px-6 py-6 sm:py-8">
-      <div className="flex flex-col gap-4 border-b border-[#172B3A]/10 pb-6 lg:flex-row lg:items-center sm:justify-between">
-        <div>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#172B3A]">{t.title}</h1>
+    <div className="mx-auto w-full min-w-0 max-w-[1440px] overflow-x-hidden space-y-6 sm:space-y-8 px-3.5 sm:px-6 py-5 sm:py-8">
+      <div className="flex flex-col gap-4 border-b border-[#172B3A]/10 pb-5 sm:pb-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#172B3A] break-words">{t.title}</h1>
           <p className="mt-1 text-sm text-[#172B3A]/70">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-wrap gap-1 rounded-lg bg-white p-1 border border-[#172B3A]/10 shrink-0">
+        <div className="grid w-full grid-cols-1 gap-1.5 rounded-xl border border-[#172B3A]/10 bg-white p-1.5 sm:grid-cols-3 lg:w-auto shrink-0">
           <button
             type="button"
             onClick={() => setMode('CUSTOMER')}
-            className={`min-h-[44px] rounded-md px-3.5 py-2 text-xs font-semibold transition-colors whitespace-nowrap ${
+            className={`min-h-[42px] inline-flex items-center justify-center rounded-lg px-3 py-2 text-center text-xs font-semibold leading-snug transition-colors ${
               mode === 'CUSTOMER' ? 'bg-[#176B52] text-white' : 'text-[#172B3A]/70 hover:text-[#172B3A]'
             }`}
           >
@@ -478,17 +515,17 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
           <button
             type="button"
             onClick={() => setMode('TRACK')}
-            className={`min-h-[44px] inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-xs font-semibold transition-colors whitespace-nowrap ${
+            className={`min-h-[42px] inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-center text-xs font-semibold leading-snug transition-colors ${
               mode === 'TRACK' ? 'bg-[#176B52] text-white' : 'text-[#172B3A]/70 hover:text-[#172B3A]'
             }`}
           >
-            <Radio className="h-3.5 w-3.5" />
-            {t.tabTrackLive}
+            <Radio className="h-3.5 w-3.5 shrink-0" />
+            <span>{t.tabTrackLive}</span>
           </button>
           <button
             type="button"
             onClick={() => setMode('PARTNER')}
-            className={`min-h-[44px] rounded-md px-3.5 py-2 text-xs font-semibold transition-colors whitespace-nowrap ${
+            className={`min-h-[42px] inline-flex items-center justify-center rounded-lg px-3 py-2 text-center text-xs font-semibold leading-snug transition-colors ${
               mode === 'PARTNER' ? 'bg-[#176B52] text-white' : 'text-[#172B3A]/70 hover:text-[#172B3A]'
             }`}
           >
@@ -498,20 +535,20 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
       </div>
 
       {mode === 'CUSTOMER' ? (
-        <div className="space-y-8">
-          <div className="grid gap-8 lg:grid-cols-12">
+        <div className="min-w-0 space-y-6 sm:space-y-8">
+          <div className="grid min-w-0 gap-5 sm:gap-6 lg:grid-cols-12 lg:gap-8">
             <form
               onSubmit={handleSubmitRequest}
-              className="space-y-5 rounded-2xl border border-[#172B3A]/10 bg-white p-4 sm:p-6 lg:col-span-7"
+              className="min-w-0 w-full space-y-5 rounded-2xl border border-[#172B3A]/10 bg-white p-3.5 sm:p-6 lg:col-span-7"
             >
-              <div className="grid grid-cols-2 gap-2 rounded-lg bg-[#F4F6F5] p-1">
+              <div className="grid grid-cols-1 gap-1.5 rounded-lg bg-[#F4F6F5] p-1 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={() => {
                     setRequestType('DELIVERY');
                     setVehicleType('MOTORCYCLE');
                   }}
-                  className={`min-h-[44px] rounded-md px-3 py-2 text-xs font-semibold ${
+                  className={`min-h-[42px] rounded-md px-3 py-2 text-center text-xs font-semibold leading-tight ${
                     requestType === 'DELIVERY'
                       ? 'bg-white text-[#176B52] shadow-sm'
                       : 'text-[#172B3A]/70'
@@ -525,7 +562,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                     setRequestType('RIDE');
                     setVehicleType('CAR');
                   }}
-                  className={`min-h-[44px] rounded-md px-3 py-2 text-xs font-semibold ${
+                  className={`min-h-[42px] rounded-md px-3 py-2 text-center text-xs font-semibold leading-tight ${
                     requestType === 'RIDE'
                       ? 'bg-white text-[#176B52] shadow-sm'
                       : 'text-[#172B3A]/70'
@@ -538,6 +575,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
               {/* Free OpenStreetMap + OSRM Route Picker */}
               <DeliveryRoutePickerMap
                 language={language}
+                knownLocations={resolvedKnownLocations}
                 activePinMode={activePinMode}
                 onChangePinMode={setActivePinMode}
                 pickup={pickup}
@@ -552,9 +590,9 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
               />
 
               {/* Calculated Route Kilometer Readout */}
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#176B52]/25 bg-emerald-50/50 px-4 py-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#176B52]/25 bg-emerald-50/50 px-3.5 py-3 text-xs sm:px-4">
                 <span className="font-semibold text-[#172B3A]">{t.distanceFromMap}</span>
-                <div className="flex items-center gap-3 font-mono font-bold tabular-nums text-[#176B52]">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 font-mono font-bold tabular-nums text-[#176B52]">
                   <span>{distanceKm} km</span>
                   {durationMin && <span className="text-[#172B3A]/70">· ~{durationMin} min</span>}
                   {routeSource === 'OSRM' && (
@@ -565,7 +603,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                 </div>
               </div>
 
-              <div>
+              <div className="min-w-0">
                 <label className="block text-xs font-medium text-[#172B3A]/75">
                   {t.packageDetails}
                 </label>
@@ -575,13 +613,13 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                   value={details}
                   onChange={(e) => setDetails(e.target.value)}
                   placeholder="e.g., Sealed electronics box #44, 2.5 kg"
-                  className="mt-1.5 h-11 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-sm"
+                  className="mt-1.5 h-11 w-full min-w-0 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-sm"
                 />
               </div>
 
               {/* Anti-Theft Receiver Identity & Declared Value */}
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div>
+              <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-[#172B3A]/75">
                     {t.receiverName}
                   </label>
@@ -591,10 +629,10 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                     value={receiverName}
                     onChange={(e) => setReceiverName(e.target.value)}
                     placeholder="Abebe Bikila"
-                    className="mt-1 h-11 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs"
+                    className="mt-1 h-11 w-full min-w-0 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs"
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-[#172B3A]/75">
                     {t.receiverPhone}
                   </label>
@@ -604,10 +642,10 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                     value={receiverPhone}
                     onChange={(e) => setReceiverPhone(e.target.value)}
                     placeholder="+251 9..."
-                    className="mt-1 h-11 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 font-mono text-xs"
+                    className="mt-1 h-11 w-full min-w-0 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 font-mono text-xs"
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="block text-xs font-medium text-[#172B3A]/75">
                     {t.declaredValue}
                   </label>
@@ -616,13 +654,13 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                     min={0}
                     value={declaredValue}
                     onChange={(e) => setDeclaredValue(e.target.value)}
-                    className="mt-1 h-11 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 font-mono text-xs"
+                    className="mt-1 h-11 w-full min-w-0 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 font-mono text-xs"
                   />
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <div className="min-w-0">
                   <span className="block text-xs font-medium text-[#172B3A]/75">
                     {t.vehicleCategory}
                   </span>
@@ -639,28 +677,28 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                           key={v.id}
                           type="button"
                           onClick={() => setVehicleType(v.id as typeof vehicleType)}
-                          className={`flex min-h-[44px] items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                          className={`flex min-h-[44px] min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-semibold sm:px-3 ${
                             vehicleType === v.id
                               ? 'border-[#176B52] bg-[#176B52]/10 text-[#176B52]'
                               : 'border-[#172B3A]/15 bg-white text-[#172B3A]/75'
                           }`}
                         >
-                          <Icon className="h-3.5 w-3.5" />
-                          {v.label}
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{v.label}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                <div className="min-w-0 space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     {(['STANDARD', 'EXPRESS'] as const).map((u) => (
                       <button
                         key={u}
                         type="button"
                         onClick={() => setUrgency(u)}
-                        className={`min-h-[44px] rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                        className={`min-h-[44px] min-w-0 rounded-lg border px-2 py-1.5 text-center text-xs font-semibold leading-tight sm:px-3 ${
                           urgency === u
                             ? 'border-[#172B3A] bg-[#172B3A] text-white'
                             : 'border-[#172B3A]/15 bg-white text-[#172B3A]/75'
@@ -671,13 +709,13 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                     {(['TELEBIRR', 'CBE_BIRR', 'CASH'] as const).map((pm) => (
                       <button
                         key={pm}
                         type="button"
                         onClick={() => setPaymentMethod(pm)}
-                        className={`min-h-[44px] rounded-lg border px-2 py-2 text-xs font-semibold ${
+                        className={`min-h-[44px] min-w-0 truncate rounded-lg border px-1.5 py-2 text-center text-xs font-semibold sm:px-2 ${
                           paymentMethod === pm
                             ? 'border-[#176B52] bg-[#176B52]/10 text-[#176B52]'
                             : 'border-[#172B3A]/15 bg-white text-[#172B3A]/75'
@@ -693,7 +731,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full min-h-[44px] rounded-lg bg-[#176B52] px-5 py-3 text-sm font-semibold text-white hover:bg-[#125641] disabled:opacity-50"
+                className="w-full min-h-[44px] rounded-lg bg-[#176B52] px-4 py-3 text-sm font-semibold text-white hover:bg-[#125641] disabled:opacity-50"
               >
                 {submitting
                   ? '...'
@@ -704,7 +742,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
             </form>
 
             {/* Transparent Fare Breakdown + Anti-Theft Protection Panel */}
-            <div className="space-y-6 rounded-2xl border border-[#172B3A]/10 bg-white p-4 sm:p-6 lg:col-span-5">
+            <div className="min-w-0 w-full space-y-6 rounded-2xl border border-[#172B3A]/10 bg-white p-3.5 sm:p-6 lg:col-span-5 lg:sticky lg:top-20 lg:self-start">
               <div>
                 <h2 className="font-display text-lg font-semibold text-[#172B3A]">
                   {t.fareBreakdownTitle}
@@ -712,31 +750,31 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                 <p className="mt-1 text-xs text-[#172B3A]/60">{t.fareBreakdownSubtitle}</p>
 
                 <div className="mt-5 space-y-3 border-t border-[#172B3A]/10 pt-4 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-[#172B3A]/70">{t.baseFee}</span>
-                    <span className="font-mono tabular-nums">{formatEtb(estimate.baseFee)}</span>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 text-[#172B3A]/70">{t.baseFee}</span>
+                    <span className="shrink-0 font-mono tabular-nums">{formatEtb(estimate.baseFee)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#172B3A]/70">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 text-[#172B3A]/70">
                       {t.distanceCharge} ({distanceKm} km × {estimate.perKm} × {estimate.vehicleMult}x)
                     </span>
-                    <span className="font-mono tabular-nums">{formatEtb(estimate.distanceFee)}</span>
+                    <span className="shrink-0 font-mono tabular-nums">{formatEtb(estimate.distanceFee)}</span>
                   </div>
                   {estimate.expressFee > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-[#172B3A]/70">{t.expressSurcharge}</span>
-                      <span className="font-mono tabular-nums">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="min-w-0 text-[#172B3A]/70">{t.expressSurcharge}</span>
+                      <span className="shrink-0 font-mono tabular-nums">
                         {formatEtb(estimate.expressFee)}
                       </span>
                     </div>
                   )}
-                  <div className="flex justify-between">
-                    <span className="text-[#172B3A]/70">{t.vatLabel}</span>
-                    <span className="font-mono tabular-nums">{formatEtb(estimate.vatAmount)}</span>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0 text-[#172B3A]/70">{t.vatLabel}</span>
+                    <span className="shrink-0 font-mono tabular-nums">{formatEtb(estimate.vatAmount)}</span>
                   </div>
-                  <div className="flex justify-between border-t border-[#172B3A]/10 pt-3 font-semibold text-[#172B3A]">
-                    <span>{t.guaranteedTotal}</span>
-                    <span className="font-mono text-xl tabular-nums text-[#176B52]">
+                  <div className="flex items-baseline justify-between gap-3 border-t border-[#172B3A]/10 pt-3 font-semibold text-[#172B3A]">
+                    <span className="min-w-0">{t.guaranteedTotal}</span>
+                    <span className="shrink-0 font-mono text-lg sm:text-xl tabular-nums text-[#176B52]">
                       {formatEtb(estimate.total)}
                     </span>
                   </div>
@@ -745,8 +783,8 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
 
               <div className="space-y-2.5 border-t border-[#172B3A]/10 pt-5 text-xs text-[#172B3A]/80">
                 <h3 className="flex items-center gap-1.5 font-display text-sm font-bold text-[#172B3A]">
-                  <ShieldCheck className="h-4 w-4 text-[#176B52]" />
-                  {t.antiTheftTitle}
+                  <ShieldCheck className="h-4 w-4 shrink-0 text-[#176B52]" />
+                  <span>{t.antiTheftTitle}</span>
                 </h3>
                 <p>· {t.antiTheft1}</p>
                 <p>· {t.antiTheft2}</p>
@@ -758,15 +796,15 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
 
           {/* Sender's Recent Escrow Dispatches & Handover OTP Codes */}
           {myCustomerDeliveries.length > 0 && (
-            <div className="rounded-2xl border border-[#172B3A]/10 bg-white p-4 sm:p-6 space-y-4">
+            <div className="min-w-0 rounded-2xl border border-[#172B3A]/10 bg-white p-3.5 sm:p-6 space-y-4">
               <h2 className="font-display text-lg font-bold text-[#172B3A]">
                 Active Escrow Dispatches & Security OTP Codes
               </h2>
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid min-w-0 gap-4 md:grid-cols-2">
                 {myCustomerDeliveries.slice(0, 4).map((d) => (
                   <div
                     key={d.id}
-                    className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/60 p-4 text-xs space-y-2.5"
+                    className="min-w-0 rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/60 p-3.5 sm:p-4 text-xs space-y-2.5"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-mono font-bold text-[#172B3A]">
@@ -776,26 +814,26 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                         {t.escrowStatus}: {d.escrowStatus || 'HELD_IN_ESCROW'}
                       </span>
                     </div>
-                    <p className="text-[#172B3A]/75">
+                    <p className="break-words text-[#172B3A]/75">
                       {d.pickupLocation} → {d.destinationLocation} ({d.distanceKm} km)
                     </p>
                     {d.receiverName && (
-                      <p className="text-[#172B3A]/65">
+                      <p className="break-words text-[#172B3A]/65">
                         Receiver: {d.receiverName} ({d.receiverPhone}) · Value:{' '}
                         {formatEtb(d.declaredValue || 0)}
                       </p>
                     )}
                     <div className="grid grid-cols-2 gap-2 pt-1 font-mono">
-                      <div className="rounded-lg border border-[#172B3A]/15 bg-white px-3 py-2">
-                        <span className="block text-[10px] text-[#172B3A]/60">
+                      <div className="min-w-0 rounded-lg border border-[#172B3A]/15 bg-white px-2.5 py-2 sm:px-3">
+                        <span className="block truncate text-[10px] text-[#172B3A]/60">
                           {t.pickupOtpLabel}
                         </span>
                         <span className="text-sm font-bold text-[#172B3A]">
                           {d.pickupOtp || 'Verified'}
                         </span>
                       </div>
-                      <div className="rounded-lg border border-[#176B52]/30 bg-white px-3 py-2">
-                        <span className="block text-[10px] text-[#176B52]">
+                      <div className="min-w-0 rounded-lg border border-[#176B52]/30 bg-white px-2.5 py-2 sm:px-3">
+                        <span className="block truncate text-[10px] text-[#176B52]">
                           {t.deliveryOtpLabel}
                         </span>
                         <span className="text-sm font-bold text-[#176B52]">
@@ -816,8 +854,8 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                       }}
                       className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-white px-3 py-1.5 text-xs font-semibold text-[#176B52] hover:bg-emerald-50"
                     >
-                      <Radio className="h-3.5 w-3.5" />
-                      {t.tabTrackLive}
+                      <Radio className="h-3.5 w-3.5 shrink-0" />
+                      <span>{t.tabTrackLive}</span>
                     </button>
                   </div>
                 ))}
@@ -826,10 +864,10 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
           )}
         </div>
       ) : mode === 'TRACK' ? (
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <form
             onSubmit={handleStartLiveTrack}
-            className="rounded-2xl border border-[#172B3A]/10 bg-white p-4 sm:p-6 space-y-4"
+            className="min-w-0 rounded-2xl border border-[#172B3A]/10 bg-white p-3.5 sm:p-6 space-y-4"
           >
             <div>
               <h2 className="font-display text-lg font-bold text-[#172B3A]">
@@ -864,8 +902,8 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
               </div>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-12">
-              <div className="sm:col-span-5">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-12">
+              <div className="min-w-0 sm:col-span-5">
                 <label className="block text-xs font-medium text-[#172B3A]/75">
                   Delivery Tracking Code
                 </label>
@@ -875,10 +913,10 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                   value={trackCodeInput}
                   onChange={(e) => setTrackCodeInput(e.target.value)}
                   placeholder="NY-DEL-..."
-                  className="mt-1 h-11 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 font-mono text-xs"
+                  className="mt-1 h-11 w-full min-w-0 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 font-mono text-xs"
                 />
               </div>
-              <div className="sm:col-span-4">
+              <div className="min-w-0 sm:col-span-4">
                 <label className="block text-xs font-medium text-[#172B3A]/75">
                   Receiver Phone (Required for Guest Receiver)
                 </label>
@@ -887,10 +925,10 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                   value={trackPhoneInput}
                   onChange={(e) => setTrackPhoneInput(e.target.value)}
                   placeholder="+251 9..."
-                  className="mt-1 h-11 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 font-mono text-xs"
+                  className="mt-1 h-11 w-full min-w-0 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 font-mono text-xs"
                 />
               </div>
-              <div className="flex items-end sm:col-span-3">
+              <div className="flex min-w-0 items-end sm:col-span-3">
                 <button
                   type="submit"
                   disabled={loadingTrack}
@@ -909,9 +947,9 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
           </form>
 
           {trackedDelivery && (
-            <div className="rounded-2xl border border-[#176B52]/25 bg-white p-4 sm:p-6 space-y-5">
-              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#172B3A]/10 pb-4">
-                <div className="space-y-1">
+            <div className="min-w-0 rounded-2xl border border-[#176B52]/25 bg-white p-3.5 sm:p-6 space-y-5">
+              <div className="flex flex-col gap-3 border-b border-[#172B3A]/10 pb-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-base font-bold text-[#172B3A]">
                       {trackedDelivery.trackingCode}
@@ -925,17 +963,17 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-[#172B3A]/75">
+                  <p className="break-words text-xs text-[#172B3A]/75">
                     {trackedDelivery.pickupLocation} → {trackedDelivery.destinationLocation} (
                     {trackedDelivery.distanceKm} km)
                   </p>
                 </div>
 
-                <div className="text-left sm:text-right font-mono text-xs">
+                <div className="min-w-0 text-left sm:text-right font-mono text-xs">
                   <p className="font-semibold text-[#176B52]">
                     Escrow: {trackedDelivery.escrowStatus}
                   </p>
-                  <p className="text-[#172B3A]/65">
+                  <p className="break-words text-[#172B3A]/65">
                     Driver: {trackedDelivery.driverName || 'Waiting for nearest <5 km partner'}
                   </p>
                 </div>
@@ -964,12 +1002,12 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                 }
                 driverName={trackedDelivery.driverName}
                 driverUpdatedAt={trackedDelivery.driverLocationUpdatedAt}
-                heightClass="h-[300px] sm:h-[380px]"
+                heightClass="h-[260px] sm:h-[380px]"
               />
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                 {trackedDelivery.deliveryOtp && (
-                  <div className="rounded-xl border border-[#176B52]/30 bg-emerald-50/40 p-4 text-xs">
+                  <div className="min-w-0 rounded-xl border border-[#176B52]/30 bg-emerald-50/40 p-4 text-xs">
                     <p className="font-semibold text-[#176B52]">
                       Receiver Delivery Verification OTP
                     </p>
@@ -984,7 +1022,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                 )}
 
                 {trackedDelivery.pickupOtp && (
-                  <div className="rounded-xl border border-[#172B3A]/15 bg-[#F4F6F5] p-4 text-xs">
+                  <div className="min-w-0 rounded-xl border border-[#172B3A]/15 bg-[#F4F6F5] p-4 text-xs">
                     <p className="font-semibold text-[#172B3A]">Sender Pickup Handover OTP</p>
                     <p className="mt-1 font-mono text-xl font-bold text-[#172B3A]">
                       {trackedDelivery.pickupOtp}
@@ -999,10 +1037,10 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
           )}
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {/* Driver Real-Time GPS & Configurable Match Radius Header */}
-          <div className="flex flex-col gap-4 rounded-xl border border-[#172B3A]/10 bg-white p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-1">
+          <div className="flex flex-col gap-4 rounded-xl border border-[#172B3A]/10 bg-white p-3.5 sm:p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 space-y-1">
               <h2 className="font-display text-lg font-semibold text-[#172B3A]">
                 {t.partnerQueueTitle}
               </h2>
@@ -1012,47 +1050,69 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                 (Admin-configured)
               </p>
               <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] font-mono text-[#172B3A]/75">
-                <MapPin className="h-3.5 w-3.5 text-[#176B52]" />
-                <span>{gpsStatusText}</span>
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-[#176B52]" />
+                <span className="break-all sm:break-normal">{gpsStatusText}</span>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center lg:w-auto">
               <select
-                aria-label="Fallback Addis Sub-City GPS"
+                aria-label="Known Location GPS Hub"
                 value=""
                 onChange={(e) => {
-                  const found = ADDIS_SUB_CITIES.find((s) => s.name === e.target.value);
+                  const val = e.target.value;
+                  if (val.startsWith('known:')) {
+                    const code = val.slice('known:'.length);
+                    const kl = resolvedKnownLocations.find((x) => x.code === code);
+                    if (kl) {
+                      const lat = Number(kl.latitude);
+                      const lng = Number(kl.longitude);
+                      setDriverGps({ lat, lng });
+                      setGpsStatusText(`Active Hub GPS: ${kl.name} (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+                    }
+                    return;
+                  }
+                  const found = ADDIS_SUB_CITIES.find((s) => s.name === val);
                   if (found) {
                     setDriverGps({ lat: found.lat, lng: found.lng });
                     setGpsStatusText(`Active Hub GPS: ${found.name} (${found.lat.toFixed(4)}, ${found.lng.toFixed(4)})`);
                   }
                 }}
-                className="h-11 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs font-medium text-[#172B3A]"
+                className="h-11 w-full min-w-0 max-w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs font-medium text-[#172B3A] sm:w-64"
               >
                 <option value="" disabled>
-                  Set Sub-City GPS Hub...
+                  Select Known Location GPS Hub ({resolvedKnownLocations.length || ADDIS_SUB_CITIES.length})...
                 </option>
-                {ADDIS_SUB_CITIES.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name} ({s.lat.toFixed(3)}, {s.lng.toFixed(3)})
-                  </option>
-                ))}
+                {groupedKnownLocations.length > 0
+                  ? groupedKnownLocations.map(([groupLabel, items]) => (
+                      <optgroup key={`hub-${groupLabel}`} label={groupLabel}>
+                        {items.map((kl) => (
+                          <option key={`hub-${kl.code}`} value={`known:${kl.code}`}>
+                            {kl.name} ({Number(kl.latitude).toFixed(4)}, {Number(kl.longitude).toFixed(4)})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  : ADDIS_SUB_CITIES.map((s) => (
+                      <option key={s.name} value={s.name}>
+                        {s.name} ({s.lat.toFixed(3)}, {s.lng.toFixed(3)})
+                      </option>
+                    ))}
               </select>
 
               <button
                 type="button"
                 onClick={refreshPartnerGps}
-                className="min-h-[44px] inline-flex items-center gap-1.5 rounded-lg border border-[#172B3A]/15 bg-white px-3.5 py-2 text-xs font-semibold text-[#172B3A] hover:bg-[#F4F6F5]"
+                className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#172B3A]/15 bg-white px-3.5 py-2 text-xs font-semibold text-[#172B3A] hover:bg-[#F4F6F5]"
               >
-                <Navigation className="h-3.5 w-3.5 text-[#176B52]" />
-                Refresh GPS
+                <Navigation className="h-3.5 w-3.5 shrink-0 text-[#176B52]" />
+                <span>Refresh GPS</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setPartnerAvailable((v) => !v)}
-                className={`min-h-[44px] rounded-lg px-4 py-2 text-xs font-semibold whitespace-nowrap ${
+                className={`min-h-[44px] rounded-lg px-4 py-2 text-xs font-semibold text-center ${
                   partnerAvailable
                     ? 'bg-[#176B52] text-white'
                     : 'border border-[#172B3A]/15 bg-[#F4F6F5] text-[#172B3A]'
@@ -1062,7 +1122,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
               </button>
 
               {!firebaseUser && (
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
                   <button
                     type="button"
                     onClick={() => openAuthModal('signin')}
@@ -1110,20 +1170,20 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
           ) : (
             <>
               {/* Mobile Card Dispatch View (< md) */}
-              <div className="space-y-4 md:hidden">
+              <div className="min-w-0 space-y-4 md:hidden">
                 {queue.map((d) => (
                   <div
                     key={`m-${d.id}`}
-                    className="rounded-xl border border-[#172B3A]/10 bg-white p-4 space-y-3 text-xs"
+                    className="min-w-0 rounded-xl border border-[#172B3A]/10 bg-white p-3.5 space-y-3 text-xs"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#172B3A]/10 pb-2.5">
-                      <div>
+                      <div className="min-w-0">
                         <p className="font-mono font-bold text-[#172B3A]">{d.trackingCode}</p>
                         <p className="text-[11px] font-medium text-[#176B52]">
                           {d.escrowStatus || 'HELD_IN_ESCROW'} · {d.status.replace('_', ' ')}
                         </p>
                       </div>
-                      <div className="text-right font-mono">
+                      <div className="shrink-0 text-right font-mono">
                         <p className="font-bold text-[#176B52]">{formatEtb(d.totalFee)}</p>
                         {d.distanceToPickupKm != null && (
                           <p className="text-[11px] font-semibold text-[#172B3A]">
@@ -1133,11 +1193,11 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <p className="font-semibold text-[#172B3A]">
+                    <div className="min-w-0 space-y-1">
+                      <p className="break-words font-semibold text-[#172B3A]">
                         {d.pickupLocation} → {d.destinationLocation}
                       </p>
-                      <p className="text-[#172B3A]/65">
+                      <p className="break-words text-[#172B3A]/65">
                         {d.packageOrRideDetails} · {d.vehicleType} · {d.distanceKm} km route · Value:{' '}
                         {formatEtb(d.declaredValue || 0)}
                       </p>
@@ -1400,10 +1460,10 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
 
       {/* Structured Conflict Modal */}
       {conflictTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#172B3A]/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden bg-[#172B3A]/50 p-3 sm:p-4">
           <form
             onSubmit={handleOpenConflict}
-            className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-md max-h-[90dvh] overflow-y-auto space-y-4 rounded-xl bg-white p-4 sm:p-6 shadow-2xl"
           >
             <h3 className="font-display text-lg font-bold text-red-700">
               {t.reportTheftFreeze} · {conflictTarget.trackingCode}
@@ -1417,7 +1477,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
               <select
                 value={conflictCategory}
                 onChange={(e) => setConflictCategory(e.target.value)}
-                className="mt-1 h-11 w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs font-medium"
+                className="mt-1 h-11 w-full min-w-0 max-w-full rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-3 text-xs font-medium"
               >
                 {CONFLICT_CATEGORIES.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -1434,7 +1494,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
               placeholder="Describe suspected theft, OTP refusal, receiver absence, or route dispute..."
               className="w-full rounded-lg border border-[#172B3A]/20 p-3 text-xs"
             />
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setConflictTarget(null)}
@@ -1455,10 +1515,10 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
 
       {/* Driver Opposing Counter-Statement Modal */}
       {counterTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#172B3A]/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden bg-[#172B3A]/50 p-3 sm:p-4">
           <form
             onSubmit={handleSubmitCounterStatement}
-            className="w-full max-w-md space-y-4 rounded-xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-md max-h-[90dvh] overflow-y-auto space-y-4 rounded-xl bg-white p-4 sm:p-6 shadow-2xl"
           >
             <h3 className="font-display text-lg font-bold text-[#172B3A]">
               Driver Counter-Statement · {counterTarget.trackingCode}
@@ -1474,7 +1534,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
               placeholder="Provide GPS evidence, handover notes, or receiver refusal details for Admin review..."
               className="w-full rounded-lg border border-[#172B3A]/20 p-3 text-xs"
             />
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setCounterTarget(null)}

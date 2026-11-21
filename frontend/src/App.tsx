@@ -22,6 +22,7 @@ import type {
   Category,
   CategoryDocumentRequirement,
   DetectedLocation,
+  KnownLocationRecord,
   Listing,
   LiveProviderPublicMarker,
   OnboardingGovernance,
@@ -145,6 +146,7 @@ function NearestYouWorkspace() {
   const [liveProviders, setLiveProviders] = useState<LiveProviderPublicMarker[]>([]);
   const [recommendations, setRecommendations] = useState<RecommendedListingItem[]>([]);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [knownLocations, setKnownLocations] = useState<KnownLocationRecord[]>([]);
   const [policy, setPolicy] = useState<PlatformPolicy>(DEFAULT_POLICY);
   const [governance, setGovernance] = useState<OnboardingGovernance>(DEFAULT_GOVERNANCE);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
@@ -325,6 +327,9 @@ function NearestYouWorkspace() {
       setLiveProviders(data.liveProviders || []);
       setRecommendations(data.recommendations || []);
       setReviews(data.reviews || []);
+      if (Array.isArray(data.knownLocations)) {
+        setKnownLocations(data.knownLocations);
+      }
       if (data.detectedLocation) {
         setDetectedLocation(data.detectedLocation);
         if (data.detectedLocation.subCity) {
@@ -385,6 +390,7 @@ function NearestYouWorkspace() {
             if (data.businesses) setBusinesses(data.businesses);
             if (data.listings) setListings(data.listings);
             if (data.liveProviders) setLiveProviders(data.liveProviders);
+            if (Array.isArray(data.knownLocations)) setKnownLocations(data.knownLocations);
           } catch {
             setDetectedLocation((prev) => ({
               ...prev,
@@ -637,6 +643,7 @@ function NearestYouWorkspace() {
         {activeSection === 'delivery' && Boolean(firebaseUser) && (
           <DeliveryTransportView
             policy={policy}
+            knownLocations={knownLocations}
             language={language}
             onNotify={notify}
           />
