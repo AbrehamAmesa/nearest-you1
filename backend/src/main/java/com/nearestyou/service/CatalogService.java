@@ -172,6 +172,75 @@ public class CatalogService {
         );
     }
 
+    /**
+     * Fast in-process location resolution (zero blocking external HTTP calls) so public catalog,
+     * advertisements, and recommendations return immediately without stalling on geolocation APIs.
+     */
+    private Map<String, Object> resolveUserLocationFast(
+            UserAccount authenticatedUser,
+            Double lat,
+            Double lng
+    ) {
+        if (lat != null && lng != null && geoDistanceService.isValidCoordinates(lat, lng)) {
+            String key = String.format(Locale.US, "%.4f,%.4f", lat, lng);
+            CachedAreaLabel cached = reverseGeoCache.get(key);
+            long now = Instant.now().toEpochMilli();
+            if (cached != null && cached.expiresAtMs() > now && !cached.label().isBlank()) {
+                return buildLocationPayload(
+                        lat,
+                        lng,
+                        cached.label(),
+                        cached.subCity(),
+                        !cached.city().isBlank() ? cached.city() : "Addis Ababa",
+                        "GPS",
+                        "EXACT"
+                );
+            }
+            return buildLocationPayload(
+                    lat,
+                    lng,
+                    String.format(Locale.US, "%.4f, %.4f", lat, lng),
+                    "",
+                    "Addis Ababa",
+                    "GPS",
+                    "EXACT"
+            );
+        }
+
+        if (authenticatedUser != null
+                && authenticatedUser.getDefaultLat() != null
+                && authenticatedUser.getDefaultLng() != null) {
+            double savedLat = authenticatedUser.getDefaultLat().doubleValue();
+            double savedLng = authenticatedUser.getDefaultLng().doubleValue();
+            boolean isLegacyPlaceholder =
+                    Math.abs(savedLat - LEGACY_PLACEHOLDER_LAT) < 0.0001
+                            && Math.abs(savedLng - LEGACY_PLACEHOLDER_LNG) < 0.0001;
+            if (!isLegacyPlaceholder && geoDistanceService.isValidCoordinates(savedLat, savedLng)) {
+                String subCity = safeStr(authenticatedUser.getDefaultSubCity());
+                String label = joinNonBlank(subCity, "Addis Ababa");
+                return buildLocationPayload(
+                        savedLat,
+                        savedLng,
+                        label.isBlank() ? "Saved Location" : label,
+                        subCity,
+                        "Addis Ababa",
+                        "SAVED_PROFILE",
+                        "SAVED"
+                );
+            }
+        }
+
+        return buildLocationPayload(
+                DEFAULT_CENTER_LAT,
+                DEFAULT_CENTER_LNG,
+                "Addis Ababa",
+                "",
+                "Addis Ababa",
+                "CITY_CENTER",
+                "APPROXIMATE"
+        );
+    }
+
     @Transactional(readOnly = true)
     public Map<String, Object> getPublicCatalog(
             HttpServletRequest request,
@@ -179,7 +248,7 @@ public class CatalogService {
             Double lat,
             Double lng
     ) {
-        Map<String, Object> detectedLocation = resolveUserLocation(request, authenticatedUser, lat, lng);
+        Map<String, Object> detectedLocation = resolveUserLocationFast(authenticatedUser, lat, lng);
         double refLat = ((Number) detectedLocation.get("lat")).doubleValue();
         double refLng = ((Number) detectedLocation.get("lng")).doubleValue();
 
@@ -270,7 +339,7 @@ public class CatalogService {
             Double lng,
             Integer limit
     ) {
-        Map<String, Object> detectedLocation = resolveUserLocation(request, authenticatedUser, lat, lng);
+        Map<String, Object> detectedLocation = resolveUserLocationFast(authenticatedUser, lat, lng);
         double refLat = ((Number) detectedLocation.get("lat")).doubleValue();
         double refLng = ((Number) detectedLocation.get("lng")).doubleValue();
         int maxResults = (limit != null && limit > 0) ? Math.min(limit, 24) : 6;
@@ -311,7 +380,7 @@ public class CatalogService {
             Boolean availableOnly,
             String sortBy
     ) {
-        Map<String, Object> detectedLocation = resolveUserLocation(request, authenticatedUser, lat, lng);
+        Map<String, Object> detectedLocation = resolveUserLocationFast(authenticatedUser, lat, lng);
         double refLat = ((Number) detectedLocation.get("lat")).doubleValue();
         double refLng = ((Number) detectedLocation.get("lng")).doubleValue();
 
@@ -477,7 +546,7 @@ public class CatalogService {
             );
         }
 
-        Map<String, Object> detectedLocation = resolveUserLocation(request, authenticatedUser, lat, lng);
+        Map<String, Object> detectedLocation = resolveUserLocationFast(authenticatedUser, lat, lng);
         double refLat = ((Number) detectedLocation.get("lat")).doubleValue();
         double refLng = ((Number) detectedLocation.get("lng")).doubleValue();
 

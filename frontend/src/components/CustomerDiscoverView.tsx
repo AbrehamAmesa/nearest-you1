@@ -449,17 +449,23 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
         return { item, biz, cat, distanceKm, effectivePrice, visualImageMatch: false };
       })
       .sort((a, b) => {
-        // Active search or DISTANCE sort prioritizes nearest results first when location is available
-        if (q || sortBy === 'DISTANCE') {
-          const diff = (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE);
-          if (diff !== 0) return diff;
-          return Number(b.item.ratingAvg) - Number(a.item.ratingAvg);
-        }
         if (sortBy === 'PRICE_ASC') return a.effectivePrice - b.effectivePrice;
         if (sortBy === 'PRICE_DESC') return b.effectivePrice - a.effectivePrice;
         if (sortBy === 'NEWEST') {
           return new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime();
         }
+        if (sortBy === 'RATING') {
+          return Number(b.item.ratingAvg) - Number(a.item.ratingAvg);
+        }
+        // Once exact location is detected, active search or DISTANCE sort orders nearest results first
+        if (hasExactLocation && (q || sortBy === 'DISTANCE')) {
+          const diff = (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE);
+          if (diff !== 0) return diff;
+          return Number(b.item.ratingAvg) - Number(a.item.ratingAvg);
+        }
+        // Before exact location is known, display published sells/ads immediately ordered by newest & rating
+        const timeDiff = new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime();
+        if (timeDiff !== 0) return timeDiff;
         return Number(b.item.ratingAvg) - Number(a.item.ratingAvg);
       });
   }, [
@@ -485,6 +491,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
     discountedOnly,
     userLat,
     userLng,
+    hasExactLocation,
   ]);
 
   // Backend-resolved recommendations shown before searching; falls back cleanly to active listings even before exact GPS is acquired, and sorts nearest-first when location updates
@@ -521,6 +528,16 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
         mapped.sort(
           (a, b) => (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE)
         );
+      } else {
+        mapped.sort((a, b) => {
+          const availA = a.listing.availabilityStatus === 'AVAILABLE' ? 0 : 1;
+          const availB = b.listing.availabilityStatus === 'AVAILABLE' ? 0 : 1;
+          if (availA !== availB) return availA - availB;
+          const timeDiff =
+            new Date(b.listing.createdAt).getTime() - new Date(a.listing.createdAt).getTime();
+          if (timeDiff !== 0) return timeDiff;
+          return Number(b.listing.ratingAvg) - Number(a.listing.ratingAvg);
+        });
       }
       return mapped;
     }
@@ -543,8 +560,14 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
         const availA = a.listing.availabilityStatus === 'AVAILABLE' ? 0 : 1;
         const availB = b.listing.availabilityStatus === 'AVAILABLE' ? 0 : 1;
         if (availA !== availB) return availA - availB;
-        const distDiff = (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE);
-        if (distDiff !== 0) return distDiff;
+        if (hasExactLocation) {
+          const distDiff = (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE);
+          if (distDiff !== 0) return distDiff;
+          return Number(b.listing.ratingAvg) - Number(a.listing.ratingAvg);
+        }
+        const timeDiff =
+          new Date(b.listing.createdAt).getTime() - new Date(a.listing.createdAt).getTime();
+        if (timeDiff !== 0) return timeDiff;
         return Number(b.listing.ratingAvg) - Number(a.listing.ratingAvg);
       })
       .slice(0, 6);

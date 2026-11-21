@@ -496,134 +496,143 @@ function NearestYouWorkspace() {
     }
   }, []);
 
-  const detectExactLocation = useCallback(
-    (userTriggered = false) => {
-      if (typeof navigator === 'undefined' || !navigator.geolocation) {
-        setDetectingLocation(false);
-        if (userTriggered) {
-          setGpsError('Browser geolocation is unavailable on this device.');
-        }
-        return;
+  const firebaseUserRef = useRef(firebaseUser);
+  firebaseUserRef.current = firebaseUser;
+
+  const detectExactLocation = useCallback((userTriggered = false) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setDetectingLocation(false);
+      if (userTriggered) {
+        setGpsError('Browser geolocation is unavailable on this device.');
       }
+      return;
+    }
 
-      setGpsError(null);
-      setDetectingLocation(true);
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const lat = Number(pos.coords.latitude.toFixed(6));
-          const lng = Number(pos.coords.longitude.toFixed(6));
-          const accuracyMeters = Number.isFinite(pos.coords.accuracy)
-            ? Math.round(pos.coords.accuracy)
-            : undefined;
-          exactGpsRef.current = { lat, lng };
+    setGpsError(null);
+    setDetectingLocation(true);
+    let settled = false;
+    const safetyTimer = window.setTimeout(
+      () => {
+        if (!settled) {
+          settled = true;
+          setDetectingLocation(false);
+          if (userTriggered) {
+            setGpsError(
+              'Exact GPS took too long to respond. Showing all listings; click Update Exact GPS to retry.'
+            );
+          }
+        }
+      },
+      userTriggered ? 13000 : 5000
+    );
 
-          setDetectedLocation((prev) => ({
-            ...prev,
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(safetyTimer);
+
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        const accuracyMeters = Number.isFinite(pos.coords.accuracy)
+          ? Math.round(pos.coords.accuracy)
+          : undefined;
+        exactGpsRef.current = { lat, lng };
+
+        // Immediately apply GPS coordinates so already-rendered listings re-order nearest-first right away
+        setDetectedLocation((prev) => ({
+          ...prev,
+          lat,
+          lng,
+          label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+          source: 'GPS',
+          accuracyMode: 'EXACT',
+          accuracyMeters,
+        }));
+        setDetectingLocation(false);
+
+        try {
+          const [recResult, browserGeoResult] = await Promise.allSettled([
+            catalogApi.getRecommendations({ lat, lng, limit: 6 }),
+            mapsApi.reverseGeocode(lat, lng),
+          ]);
+
+          const recData = recResult.status === 'fulfilled' ? recResult.value.data : null;
+          const browserGeo =
+            browserGeoResult.status === 'fulfilled' ? browserGeoResult.value.data : null;
+
+          const backendLoc = recData?.detectedLocation;
+          const exactLabel =
+            (browserGeo?.exactLabel && browserGeo.exactLabel.trim()) ||
+            (backendLoc?.label && backendLoc.label.trim()) ||
+            `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+          const resolvedSubCity =
+            (browserGeo?.subCity && browserGeo.subCity.trim()) ||
+            (backendLoc?.subCity && backendLoc.subCity.trim()) ||
+            '';
+          const resolvedCity =
+            (browserGeo?.city && browserGeo.city.trim()) ||
+            (backendLoc?.city && backendLoc.city.trim()) ||
+            'Addis Ababa';
+
+          setDetectedLocation({
             lat,
             lng,
-            label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+            label: exactLabel,
+            subCity: resolvedSubCity,
+            city: resolvedCity,
             source: 'GPS',
             accuracyMode: 'EXACT',
             accuracyMeters,
-          }));
+          });
 
-          try {
-            const [catalogResult, browserGeoResult] = await Promise.allSettled([
-              catalogApi.getCatalog({ lat, lng }),
-              mapsApi.reverseGeocode(lat, lng),
-            ]);
-
-            const catalogData =
-              catalogResult.status === 'fulfilled' ? catalogResult.value.data : null;
-            const browserGeo =
-              browserGeoResult.status === 'fulfilled' ? browserGeoResult.value.data : null;
-
-            const backendLoc = catalogData?.detectedLocation;
-            const exactLabel =
-              (browserGeo?.exactLabel && browserGeo.exactLabel.trim()) ||
-              (backendLoc?.label && backendLoc.label.trim()) ||
-              `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-            const resolvedSubCity =
-              (browserGeo?.subCity && browserGeo.subCity.trim()) ||
-              (backendLoc?.subCity && backendLoc.subCity.trim()) ||
-              '';
-            const resolvedCity =
-              (browserGeo?.city && browserGeo.city.trim()) ||
-              (backendLoc?.city && backendLoc.city.trim()) ||
-              'Addis Ababa';
-
-            setDetectedLocation({
-              lat,
-              lng,
-              label: exactLabel,
-              subCity: resolvedSubCity,
-              city: resolvedCity,
-              source: 'GPS',
-              accuracyMode: 'EXACT',
-              accuracyMeters,
-            });
-
-            if (resolvedSubCity) {
-              setProfileSubCity((prev) => (prev === 'Addis Ababa' ? resolvedSubCity : prev));
-            }
-
-            if (firebaseUser) {
-              userApi
-                .updateProfile({
-                  defaultLat: lat,
-                  defaultLng: lng,
-                  defaultSubCity: resolvedSubCity || undefined,
-                })
-                .catch(() => {});
-            }
-
-            if (catalogData?.recommendations) setRecommendations(catalogData.recommendations);
-            if (catalogData?.categories) setCategories(catalogData.categories);
-            if (catalogData?.businesses) setBusinesses(catalogData.businesses);
-            if (catalogData?.listings) setListings(catalogData.listings);
-            if (catalogData?.liveProviders) setLiveProviders(catalogData.liveProviders);
-            if (Array.isArray(catalogData?.knownLocations)) {
-              setKnownLocations(catalogData.knownLocations);
-            }
-          } catch {
-            setDetectedLocation((prev) => ({
-              ...prev,
-              lat,
-              lng,
-              label: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
-              source: 'GPS',
-              accuracyMode: 'EXACT',
-              accuracyMeters,
-            }));
-          } finally {
-            setDetectingLocation(false);
+          if (resolvedSubCity) {
+            setProfileSubCity((prev) => (prev === 'Addis Ababa' ? resolvedSubCity : prev));
           }
-        },
-        (err) => {
-          setDetectingLocation(false);
-          if (userTriggered) {
-            if (err.code === err.PERMISSION_DENIED) {
-              setGpsError(
-                'Location permission denied. Allow GPS access in your browser settings to show your exact location.'
-              );
-            } else if (err.code === err.TIMEOUT) {
-              setGpsError(
-                'Exact GPS timed out. Enable device location services and click Update Exact GPS again.'
-              );
-            } else {
-              setGpsError('Could not acquire exact GPS coordinates on this device.');
-            }
+
+          if (firebaseUserRef.current) {
+            userApi
+              .updateProfile({
+                defaultLat: lat,
+                defaultLng: lng,
+                defaultSubCity: resolvedSubCity || undefined,
+              })
+              .catch(() => {});
           }
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: userTriggered ? 12000 : 8000,
-          maximumAge: userTriggered ? 0 : 60000,
+
+          if (Array.isArray(recData?.recommendations)) {
+            setRecommendations(recData.recommendations);
+          }
+        } catch {
+          // Coordinates already applied above; reverse-geocode label stays coordinate fallback
         }
-      );
-    },
-    [firebaseUser]
-  );
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(safetyTimer);
+        setDetectingLocation(false);
+        if (userTriggered) {
+          if (err.code === err.PERMISSION_DENIED) {
+            setGpsError(
+              'Location permission denied. Allow GPS access in your browser settings to show your exact location.'
+            );
+          } else if (err.code === err.TIMEOUT) {
+            setGpsError(
+              'Exact GPS timed out. Enable device location services and click Update Exact GPS again.'
+            );
+          } else {
+            setGpsError('Could not acquire exact GPS coordinates on this device.');
+          }
+        }
+      },
+      {
+        enableHighAccuracy: userTriggered,
+        timeout: userTriggered ? 12000 : 4500,
+        maximumAge: userTriggered ? 0 : 120000,
+      }
+    );
+  }, []);
 
   useEffect(() => {
     void loadCatalog();
