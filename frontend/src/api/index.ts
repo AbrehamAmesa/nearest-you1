@@ -79,6 +79,7 @@ export const commerceApi = {
 // EngagementController
 export const engagementApi = {
   toggleFavorite: (listingId: number | string) => api.post('/api/v1/favorites/toggle', { listingId }),
+  getPendingNotifications: () => api.get('/api/v1/notifications/pending'),
   getChatThreads: () => api.get('/api/v1/messages/threads'),
   getThreadMessages: (threadKey: string) =>
     api.get('/api/v1/messages/thread', { params: { threadKey } }),

@@ -40,6 +40,13 @@ public class EngagementController {
         return engagementService.getChatThreads(principal);
     }
 
+    @GetMapping("/notifications/pending")
+    public List<Map<String, Object>> getPendingNotifications(
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        return engagementService.getPendingNotifications(principal);
+    }
+
     @GetMapping("/messages/thread")
     public Map<String, Object> getThreadMessages(
             @AuthenticationPrincipal UserPrincipal principal,

@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { engagementApi } from '../api/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
-import type { ChatMessage, ServiceContractRecord } from '../types/nearestyou.ts';
+import type {
+  BookingRecord,
+  ChatMessage,
+  DeliveryRecord,
+  JobApplicationRecord,
+  OrderRecord,
+  ServiceContractRecord,
+} from '../types/nearestyou.ts';
 
 function buildWebSocketUrl(token: string): string {
   const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
@@ -313,17 +320,79 @@ export function useLiveChat({
   };
 }
 
+export interface IncomingMessageMeta {
+  threadKey?: string | null;
+  ownerUid?: string | null;
+}
+
+export interface ContractUpdatedWsEvent {
+  type: 'contract:updated';
+  threadKey?: string | null;
+  actorUid?: string | null;
+  contract: ServiceContractRecord;
+}
+
+export interface OrderUpdatedWsEvent {
+  type: 'order:updated';
+  action?: string;
+  actorUid?: string | null;
+  threadKey?: string | null;
+  businessId?: number;
+  businessName?: string;
+  ownerUid?: string | null;
+  customerUid?: string | null;
+  order: OrderRecord;
+}
+
+export interface BookingUpdatedWsEvent {
+  type: 'booking:updated';
+  action?: string;
+  actorUid?: string | null;
+  threadKey?: string | null;
+  businessId?: number;
+  businessName?: string;
+  listingTitle?: string;
+  ownerUid?: string | null;
+  customerUid?: string | null;
+  booking: BookingRecord;
+}
+
+export interface ApplicationUpdatedWsEvent {
+  type: 'application:updated';
+  action?: string;
+  actorUid?: string | null;
+  businessId?: number;
+  businessName?: string;
+  listingTitle?: string;
+  ownerUid?: string | null;
+  applicantUid?: string | null;
+  application: JobApplicationRecord;
+}
+
+export interface DeliveryUpdatedWsEvent {
+  type: 'delivery:updated';
+  action?: string;
+  actorUid?: string | null;
+  delivery: Partial<DeliveryRecord> & { id: number; trackingCode: string; status: string };
+}
+
+export interface InboxListenerHandlers {
+  onIncomingMessage?: (msg: ChatMessage, meta?: IncomingMessageMeta) => void;
+  onContractUpdated?: (contract: ServiceContractRecord, event?: ContractUpdatedWsEvent) => void;
+  onOrderUpdated?: (event: OrderUpdatedWsEvent) => void;
+  onBookingUpdated?: (event: BookingUpdatedWsEvent) => void;
+  onApplicationUpdated?: (event: ApplicationUpdatedWsEvent) => void;
+  onDeliveryUpdated?: (event: DeliveryUpdatedWsEvent) => void;
+}
+
 export function useLiveChatInboxListener(
   enabled: boolean,
-  onIncomingMessage: (msg: ChatMessage) => void,
-  onContractUpdated?: (contract: ServiceContractRecord) => void
+  handlers: InboxListenerHandlers
 ) {
   const { dbUser, getAccessToken } = useAuth();
   const [connected, setConnected] = useState(false);
-  const callbackRef = useRef(onIncomingMessage);
-  const contractCallbackRef = useRef(onContractUpdated);
-  callbackRef.current = onIncomingMessage;
-  contractCallbackRef.current = onContractUpdated;
+  const handlersRef = useRef(handlers);
+  handlersRef.current = handlers;
 
   useEffect(() => {
     if (!enabled || !dbUser) {
@@ -361,9 +430,23 @@ export function useLiveChatInboxListener(
           try {
             const payload = JSON.parse(event.data);
             if (payload.type === 'chat:message' && payload.message) {
-              callbackRef.current(payload.message as ChatMessage);
+              handlersRef.current.onIncomingMessage?.(payload.message as ChatMessage, {
+                threadKey: payload.threadKey ?? null,
+                ownerUid: payload.ownerUid ?? null,
+              });
             } else if (payload.type === 'contract:updated' && payload.contract) {
-              contractCallbackRef.current?.(payload.contract as ServiceContractRecord);
+              handlersRef.current.onContractUpdated?.(
+                payload.contract as ServiceContractRecord,
+                payload as ContractUpdatedWsEvent
+              );
+            } else if (payload.type === 'order:updated' && payload.order) {
+              handlersRef.current.onOrderUpdated?.(payload as OrderUpdatedWsEvent);
+            } else if (payload.type === 'booking:updated' && payload.booking) {
+              handlersRef.current.onBookingUpdated?.(payload as BookingUpdatedWsEvent);
+            } else if (payload.type === 'application:updated' && payload.application) {
+              handlersRef.current.onApplicationUpdated?.(payload as ApplicationUpdatedWsEvent);
+            } else if (payload.type === 'delivery:updated' && payload.delivery) {
+              handlersRef.current.onDeliveryUpdated?.(payload as DeliveryUpdatedWsEvent);
             }
           } catch {
             /* ignore */

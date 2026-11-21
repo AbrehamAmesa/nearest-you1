@@ -5,6 +5,7 @@ import com.nearestyou.entity.*;
 import com.nearestyou.exception.ApiException;
 import com.nearestyou.repository.*;
 import com.nearestyou.security.UserPrincipal;
+import com.nearestyou.websocket.LiveChatBroker;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,19 +28,22 @@ public class DeliveryDispatchService {
     private final PlatformSettingRepository settingRepo;
     private final ProviderRegistrationRepository providerRepo;
     private final AuditLogRepository auditLogRepo;
+    private final LiveChatBroker liveChatBroker;
 
     public DeliveryDispatchService(
             DeliveryRequestRepository deliveryRepo,
             CommissionRecordRepository commissionRepo,
             PlatformSettingRepository settingRepo,
             ProviderRegistrationRepository providerRepo,
-            AuditLogRepository auditLogRepo
+            AuditLogRepository auditLogRepo,
+            LiveChatBroker liveChatBroker
     ) {
         this.deliveryRepo = deliveryRepo;
         this.commissionRepo = commissionRepo;
         this.settingRepo = settingRepo;
         this.providerRepo = providerRepo;
         this.auditLogRepo = auditLogRepo;
+        this.liveChatBroker = liveChatBroker;
     }
 
     private double getMatchRadiusKm() {
@@ -332,6 +336,7 @@ public class DeliveryDispatchService {
             log.setEntityId(String.valueOf(id));
             log.setDetails(Map.of("status", "ASSIGNED", "driverUid", principal.uid()));
             auditLogRepo.save(log);
+            liveChatBroker.broadcastDeliveryEvent(claimed, principal.uid(), "ASSIGNED");
             return sanitizeForViewer(claimed, principal, null);
         }
 
@@ -394,6 +399,7 @@ public class DeliveryDispatchService {
         log.setDetails(Map.of("status", status, "escrowStatus", saved.getEscrowStatus()));
         auditLogRepo.save(log);
 
+        liveChatBroker.broadcastDeliveryEvent(saved, principal.uid(), status);
         return sanitizeForViewer(saved, principal, null);
     }
 
@@ -426,6 +432,7 @@ public class DeliveryDispatchService {
         log.setDetails(Map.of("trackingCode", saved.getTrackingCode(), "reason", saved.getDisputeReason()));
         auditLogRepo.save(log);
 
+        liveChatBroker.broadcastDeliveryEvent(saved, principal.uid(), "DISPUTED");
         return sanitizeForViewer(saved, principal, null);
     }
 
@@ -439,6 +446,7 @@ public class DeliveryDispatchService {
         existing.setConflictCounterStatement(statement.trim());
         existing.setConflictStatus("UNDER_REVIEW");
         DeliveryRequest saved = deliveryRepo.save(existing);
+        liveChatBroker.broadcastDeliveryEvent(saved, principal.uid(), "CONFLICT_STATEMENT");
         return sanitizeForViewer(saved, principal, null);
     }
 

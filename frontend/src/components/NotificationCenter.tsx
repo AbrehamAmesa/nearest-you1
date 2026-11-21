@@ -11,6 +11,7 @@ export type NotificationKind = 'message' | 'offer' | 'success' | 'error';
 
 export interface AppNotification {
   id: string;
+  eventId?: string;
   kind: NotificationKind;
   title: string;
   message: string;
@@ -18,6 +19,8 @@ export interface AppNotification {
   read: boolean;
   actionLabel?: string;
   actionTarget?: AppSection;
+  targetTab?: string;
+  threadKey?: string;
   onAction?: () => void;
 }
 
@@ -107,11 +110,16 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
         const HeaderIcon = isMessage ? MessageSquare : Bell;
 
+        const hasAction = Boolean(item.onAction || item.actionTarget || item.threadKey);
+
         return (
           <div
             key={item.id}
             role="status"
-            className={`pointer-events-auto w-full overflow-hidden rounded-2xl border bg-white shadow-2xl ${borderClass}`}
+            onClick={hasAction ? () => onExecuteAction(item) : undefined}
+            className={`pointer-events-auto w-full overflow-hidden rounded-2xl border bg-white shadow-2xl ${borderClass} ${
+              hasAction ? 'cursor-pointer transition hover:shadow-xl' : ''
+            }`}
           >
             {/* Top Band with Message or Bell Icon + Mark Read */}
             <div className={`flex items-center justify-between gap-2 px-3.5 py-2 ${headerBg}`}>
@@ -132,7 +140,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                 </span>
                 <button
                   type="button"
-                  onClick={() => onMarkAsRead(item.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMarkAsRead(item.id);
+                  }}
                   aria-label="Mark notification as read"
                   className="inline-flex items-center gap-1 rounded-md bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white transition-colors hover:bg-white/25"
                 >
@@ -154,10 +165,13 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
               </p>
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                {(item.onAction || item.actionTarget) && item.actionLabel ? (
+                {hasAction ? (
                   <button
                     type="button"
-                    onClick={() => onExecuteAction(item)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onExecuteAction(item);
+                    }}
                     className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold text-white transition-colors ${
                       isMessage
                         ? 'bg-[#176B52] hover:bg-[#125641]'
@@ -165,7 +179,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                     }`}
                   >
                     <HeaderIcon className="h-3 w-3" />
-                    <span>{item.actionLabel}</span>
+                    <span>{item.actionLabel || (isMessage ? 'Open Message' : 'Open')}</span>
                     <ArrowRight className="h-3 w-3" />
                   </button>
                 ) : (
@@ -176,7 +190,10 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => onMarkAsRead(item.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMarkAsRead(item.id);
+                  }}
                   className="inline-flex items-center gap-1 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5] px-2.5 py-1 text-[11px] font-semibold text-[#172B3A] hover:bg-[#E8ECEA]"
                 >
                   <CheckCheck className="h-3 w-3 text-[#176B52]" />

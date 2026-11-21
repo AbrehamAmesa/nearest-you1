@@ -5,6 +5,7 @@ import com.nearestyou.entity.*;
 import com.nearestyou.exception.ApiException;
 import com.nearestyou.repository.*;
 import com.nearestyou.security.UserPrincipal;
+import com.nearestyou.websocket.LiveChatBroker;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +30,7 @@ public class OrderAndBookingService {
     private final CommissionRecordRepository commissionRepo;
     private final PlatformSettingRepository settingRepo;
     private final AuditLogRepository auditLogRepo;
+    private final LiveChatBroker liveChatBroker;
 
     public OrderAndBookingService(
             CustomerOrderRepository orderRepo,
@@ -38,7 +40,8 @@ public class OrderAndBookingService {
             ServiceListingRepository listingRepo,
             CommissionRecordRepository commissionRepo,
             PlatformSettingRepository settingRepo,
-            AuditLogRepository auditLogRepo
+            AuditLogRepository auditLogRepo,
+            LiveChatBroker liveChatBroker
     ) {
         this.orderRepo = orderRepo;
         this.bookingRepo = bookingRepo;
@@ -48,6 +51,7 @@ public class OrderAndBookingService {
         this.commissionRepo = commissionRepo;
         this.settingRepo = settingRepo;
         this.auditLogRepo = auditLogRepo;
+        this.liveChatBroker = liveChatBroker;
     }
 
     @Transactional
@@ -277,6 +281,7 @@ public class OrderAndBookingService {
             ));
             auditLogRepo.save(log);
 
+            liveChatBroker.broadcastOrderEvent(order, biz, principal.uid(), "CREATED");
             createdOrders.add(order);
         }
         return createdOrders;
@@ -352,6 +357,7 @@ public class OrderAndBookingService {
         ));
         auditLogRepo.save(log);
 
+        liveChatBroker.broadcastOrderEvent(saved, biz, principal.uid(), "STATUS_UPDATED");
         return saved;
     }
 
@@ -522,6 +528,7 @@ public class OrderAndBookingService {
         cr.setStatus("RECORDED");
         commissionRepo.save(cr);
 
+        liveChatBroker.broadcastBookingEvent(booking, biz, listing.getTitle(), principal.uid(), "CREATED");
         return booking;
     }
 
@@ -555,7 +562,12 @@ public class OrderAndBookingService {
                 throw new ApiException(HttpStatus.FORBIDDEN, "Customers can only approve a revised quote or cancel an active booking.");
             }
         }
-        return bookingRepo.save(booking);
+        Booking saved = bookingRepo.save(booking);
+        String listingTitle = listingRepo.findById(saved.getListingId())
+                .map(ServiceListing::getTitle)
+                .orElse(saved.getBookingType());
+        liveChatBroker.broadcastBookingEvent(saved, biz, listingTitle, principal.uid(), "STATUS_UPDATED");
+        return saved;
     }
 
     private double toDouble(Object value, double fallback) {

@@ -60,7 +60,7 @@ import { LiveChatPanel } from './LiveChatPanel.tsx';
 import { ProviderOnboardingWizard } from './ProviderOnboardingWizard.tsx';
 import { RealtimeLocationPickerMap } from './ServiceMap.tsx';
 
-type BusinessPortalTab =
+export type BusinessPortalTab =
   | 'PROVIDER_KYC'
   | 'PEER_VOUCH'
   | 'APPROVALS'
@@ -79,6 +79,9 @@ interface BusinessPortalViewProps {
   governance: OnboardingGovernance;
   language?: AppLanguage;
   initialTab?: BusinessPortalTab;
+  requestedTab?: BusinessPortalTab;
+  requestedThreadKey?: string | null;
+  navSignal?: number;
   onRefreshCatalog: () => void;
   onNotify: (msg: string) => void;
   onEditListing?: (listing: Listing) => void;
@@ -92,6 +95,9 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   governance,
   language = 'en',
   initialTab = 'PROVIDER_KYC',
+  requestedTab,
+  requestedThreadKey,
+  navSignal = 0,
   onRefreshCatalog,
   onNotify,
   onEditListing,
@@ -101,7 +107,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     () => categories.filter((c) => c.status === 'ACTIVE'),
     [categories]
   );
-  const [tab, setTab] = useState<BusinessPortalTab>(initialTab);
+  const [tab, setTab] = useState<BusinessPortalTab>(requestedTab || initialTab);
   const [ownedBusinesses, setOwnedBusinesses] = useState<Business[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
@@ -110,10 +116,13 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   const [providerReg, setProviderReg] = useState<ProviderRegistration | null>(null);
   const [portalReqs, setPortalReqs] = useState<CategoryDocumentRequirement[]>(documentRequirements);
   const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
-  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
+  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(
+    requestedThreadKey ?? null
+  );
   const [chatDrawerTarget, setChatDrawerTarget] = useState<ActiveChatTarget | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [contractRefreshSignal, setContractRefreshSignal] = useState(0);
+  const chatSectionRef = useRef<HTMLDivElement>(null);
 
   // Per-order seller acceptance ETA & rejection inputs
   const [orderReadyMins, setOrderReadyMins] = useState<Record<number, string>>({});
@@ -217,16 +226,28 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     }
   };
 
-  useLiveChatInboxListener(
-    Boolean(firebaseUser),
-    () => {
-      loadThreadsOnly();
+  const loadThreadsRef = useRef(loadThreadsOnly);
+  loadThreadsRef.current = loadThreadsOnly;
+  const loadPortalRef = useRef<() => Promise<void>>(async () => {});
+
+  useLiveChatInboxListener(Boolean(firebaseUser), {
+    onIncomingMessage: () => {
+      loadThreadsRef.current();
     },
-    () => {
+    onContractUpdated: () => {
       setContractRefreshSignal((n) => n + 1);
-      loadThreadsOnly();
-    }
-  );
+      loadThreadsRef.current();
+    },
+    onOrderUpdated: () => {
+      loadPortalRef.current();
+    },
+    onBookingUpdated: () => {
+      loadPortalRef.current();
+    },
+    onApplicationUpdated: () => {
+      loadPortalRef.current();
+    },
+  });
 
   const loadPortalData = async () => {
     if (!firebaseUser) return;
@@ -266,6 +287,8 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     }
   };
 
+  loadPortalRef.current = loadPortalData;
+
   const loadApprovalsQueue = async () => {
     if (!firebaseUser || !canApproveProviders) return;
     setLoadingApprovals(true);
@@ -282,9 +305,34 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     }
   };
 
+  const prevInitialTabRef = useRef(initialTab);
   useEffect(() => {
-    setTab(initialTab);
+    if (prevInitialTabRef.current !== initialTab) {
+      prevInitialTabRef.current = initialTab;
+      setTab(initialTab);
+    }
   }, [initialTab]);
+
+  useEffect(() => {
+    if (navSignal <= 0) return;
+    if (requestedTab) {
+      setTab(requestedTab);
+    }
+    if (requestedThreadKey) {
+      setSelectedThreadKey(requestedThreadKey);
+      loadThreadsRef.current();
+      window.requestAnimationFrame(() => {
+        chatSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+    if (
+      requestedTab === 'ORDERS' ||
+      requestedTab === 'BOOKINGS' ||
+      requestedTab === 'RECRUITMENT'
+    ) {
+      loadPortalRef.current();
+    }
+  }, [navSignal, requestedTab, requestedThreadKey]);
 
   useEffect(() => {
     setPortalReqs(documentRequirements);
@@ -2634,11 +2682,13 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
             )}
           </div>
 
-          <div className="min-w-0 space-y-4 lg:col-span-7">
+          <div ref={chatSectionRef} className="min-w-0 space-y-4 lg:col-span-7">
             {(() => {
               const selected =
-                threads.find((th) => th.threadKey === selectedThreadKey) || threads[0];
-              if (!selected) {
+                threads.find((th) => th.threadKey === selectedThreadKey) ||
+                (selectedThreadKey ? null : threads[0]);
+              const activeThreadKey = selected?.threadKey || selectedThreadKey;
+              if (!activeThreadKey) {
                 return (
                   <div className="flex h-72 items-center justify-center rounded-2xl border border-[#172B3A]/10 bg-white p-8 text-center text-xs text-[#172B3A]/60">
                     Select a client conversation on the left to write a reply.
@@ -2648,32 +2698,36 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
               return (
                 <>
                   <LiveChatPanel
-                    threadKey={selected.threadKey}
-                    businessId={selected.businessId}
-                    listingId={selected.listingId}
-                    orderId={selected.orderId}
-                    bookingId={selected.bookingId}
-                    recipientUid={selected.otherPartyUid}
-                    title={`Reply to ${selected.otherPartyName || 'Client'}`}
+                    threadKey={activeThreadKey}
+                    businessId={selected?.businessId}
+                    listingId={selected?.listingId}
+                    orderId={selected?.orderId}
+                    bookingId={selected?.bookingId}
+                    recipientUid={selected?.otherPartyUid}
+                    title={`Reply to ${selected?.otherPartyName || 'Client'}`}
                     subtitle={
-                      selected.orderNumber
-                        ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
-                        : selected.listingTitle || selected.businessName
+                      selected
+                        ? selected.orderNumber
+                          ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
+                          : selected.listingTitle || selected.businessName
+                        : 'Loading conversation...'
                     }
-                    initialLastSeenAt={selected.otherPartyLastSeenAt}
-                    initialActiveLastMinute={selected.otherPartyActiveLastMinute}
+                    initialLastSeenAt={selected?.otherPartyLastSeenAt}
+                    initialActiveLastMinute={selected?.otherPartyActiveLastMinute}
                     placeholder="Write a message to reply..."
                     onMessageSentOrReceived={() => loadThreadsOnly()}
                     onContractUpdated={() => setContractRefreshSignal((n) => n + 1)}
                   />
-                  {!selected.orderId && (
+                  {!selected?.orderId && (
                     <ContractOfferSection
-                      threadKey={selected.threadKey}
-                      businessId={selected.businessId}
-                      listingId={selected.listingId}
-                      bookingId={selected.bookingId}
-                      recipientUid={selected.otherPartyUid}
-                      defaultTitle={selected.listingTitle || selected.businessName}
+                      threadKey={activeThreadKey}
+                      businessId={selected?.businessId}
+                      listingId={selected?.listingId}
+                      bookingId={selected?.bookingId}
+                      recipientUid={selected?.otherPartyUid}
+                      defaultTitle={
+                        selected?.listingTitle || selected?.businessName || 'Service Request'
+                      }
                       isOwner
                       compact
                       refreshSignal={contractRefreshSignal}

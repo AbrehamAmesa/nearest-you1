@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
-import type { CartItem, PlatformPolicy } from '../types/nearestyou.ts';
+import type { CartItem, OrderRecord, PlatformPolicy } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
 import { calculateReturnLoss, getListingPolicy } from '../utils/listingPolicy.ts';
 import { getPublicProviderLabel } from '../utils/sellerDisplay.ts';
@@ -17,7 +17,7 @@ interface CartDrawerProps {
   userLng: number;
   subCityName: string;
   policy: PlatformPolicy;
-  onOrderSuccess: (orderNumbers: string[]) => void;
+  onOrderSuccess: (orders: OrderRecord[]) => void;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -210,9 +210,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       if (!res.ok) {
         throw new Error(data.error || 'Checkout failed.');
       }
-      const orderNumbers = (data.orders || []).map((o: { orderNumber: string }) => o.orderNumber);
+      const createdOrders: OrderRecord[] = Array.isArray(data.orders) ? data.orders : [];
       onClearCart();
-      onOrderSuccess(orderNumbers);
+      onOrderSuccess(createdOrders);
       onClose();
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Unable to complete checkout.');

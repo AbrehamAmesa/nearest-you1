@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Briefcase,
@@ -31,10 +31,21 @@ import { LiveChatDrawer, type ActiveChatTarget } from './LiveChatDrawer.tsx';
 import { LiveChatPanel } from './LiveChatPanel.tsx';
 import { LiveDriverTrackerMap } from './ServiceMap.tsx';
 
+export type ActivityTab =
+  | 'ORDERS'
+  | 'BOOKINGS'
+  | 'DELIVERIES'
+  | 'MESSAGES'
+  | 'JOBS'
+  | 'FAVORITES';
+
 interface CustomerActivityViewProps {
   businesses: Business[];
   listings: Listing[];
   language: AppLanguage;
+  requestedTab?: ActivityTab;
+  requestedThreadKey?: string | null;
+  navSignal?: number;
   onNotify: (msg: string) => void;
   onRefreshCatalog: () => void;
   onOpenJobSeekerAdvertise?: () => void;
@@ -45,6 +56,9 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   businesses,
   listings,
   language,
+  requestedTab,
+  requestedThreadKey,
+  navSignal = 0,
   onNotify,
   onRefreshCatalog,
   onOpenJobSeekerAdvertise,
@@ -52,9 +66,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
 }) => {
   const t = TRANSLATIONS[language].activity;
   const { dbUser, firebaseUser, openAuthModal, authFetch } = useAuth();
-  const [tab, setTab] = useState<
-    'ORDERS' | 'BOOKINGS' | 'DELIVERIES' | 'MESSAGES' | 'JOBS' | 'FAVORITES'
-  >('ORDERS');
+  const [tab, setTab] = useState<ActivityTab>(requestedTab || 'ORDERS');
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [bookings, setBookings] = useState<BookingRecord[]>([]);
@@ -63,10 +75,13 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   const [myJobSeekerAds, setMyJobSeekerAds] = useState<Listing[]>([]);
   const [favIds, setFavIds] = useState<number[]>([]);
   const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
-  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
+  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(
+    requestedThreadKey ?? null
+  );
   const [chatDrawerTarget, setChatDrawerTarget] = useState<ActiveChatTarget | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [contractRefreshSignal, setContractRefreshSignal] = useState(0);
+  const chatSectionRef = useRef<HTMLDivElement>(null);
 
   // Verified review modal state
   const [reviewTarget, setReviewTarget] = useState<{
@@ -105,16 +120,31 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
     }
   };
 
-  useLiveChatInboxListener(
-    Boolean(firebaseUser),
-    () => {
-      loadThreadsOnly();
+  const loadThreadsRef = useRef(loadThreadsOnly);
+  loadThreadsRef.current = loadThreadsOnly;
+  const loadWorkspaceRef = useRef<() => Promise<void>>(async () => {});
+
+  useLiveChatInboxListener(Boolean(firebaseUser), {
+    onIncomingMessage: () => {
+      loadThreadsRef.current();
     },
-    () => {
+    onContractUpdated: () => {
       setContractRefreshSignal((n) => n + 1);
-      loadThreadsOnly();
-    }
-  );
+      loadThreadsRef.current();
+    },
+    onOrderUpdated: () => {
+      loadWorkspaceRef.current();
+    },
+    onBookingUpdated: () => {
+      loadWorkspaceRef.current();
+    },
+    onApplicationUpdated: () => {
+      loadWorkspaceRef.current();
+    },
+    onDeliveryUpdated: () => {
+      loadWorkspaceRef.current();
+    },
+  });
 
   const loadWorkspace = async () => {
     if (!firebaseUser) return;
@@ -150,9 +180,33 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
     }
   };
 
+  loadWorkspaceRef.current = loadWorkspace;
+
   useEffect(() => {
     if (firebaseUser) loadWorkspace();
   }, [firebaseUser]);
+
+  useEffect(() => {
+    if (navSignal <= 0) return;
+    if (requestedTab) {
+      setTab(requestedTab);
+    }
+    if (requestedThreadKey) {
+      setSelectedThreadKey(requestedThreadKey);
+      loadThreadsRef.current();
+      window.requestAnimationFrame(() => {
+        chatSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+    if (
+      requestedTab === 'ORDERS' ||
+      requestedTab === 'BOOKINGS' ||
+      requestedTab === 'DELIVERIES' ||
+      requestedTab === 'JOBS'
+    ) {
+      loadWorkspaceRef.current();
+    }
+  }, [navSignal, requestedTab, requestedThreadKey]);
 
   useEffect(() => {
     if (!firebaseUser) {
@@ -848,53 +902,67 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                 )}
               </div>
 
-              <div className="min-w-0 space-y-4 lg:col-span-7">
+              <div ref={chatSectionRef} className="min-w-0 space-y-4 lg:col-span-7">
                 {(() => {
                   const selected =
-                    threads.find((th) => th.threadKey === selectedThreadKey) || threads[0];
-                  if (!selected) {
+                    threads.find((th) => th.threadKey === selectedThreadKey) ||
+                    (selectedThreadKey ? null : threads[0]);
+                  const activeThreadKey = selected?.threadKey || selectedThreadKey;
+                  if (!activeThreadKey) {
                     return (
                       <div className="flex h-72 items-center justify-center rounded-xl border border-[#172B3A]/10 bg-white p-8 text-center text-xs text-[#172B3A]/60">
                         Select a conversation on the left to read messages and reply live.
                       </div>
                     );
                   }
-                  const selectedBiz = selected.businessId ? bizById[selected.businessId] : undefined;
+                  const selectedBiz = selected?.businessId ? bizById[selected.businessId] : undefined;
                   const myUids = new Set(
                     [dbUser?.uid, dbUser?.firebaseUid, firebaseUser?.uid].filter(Boolean) as string[]
                   );
                   const isThreadOwner = Boolean(
-                    selected.viewerIsOwner || (selectedBiz && myUids.has(selectedBiz.ownerUid))
+                    selected?.viewerIsOwner || (selectedBiz && myUids.has(selectedBiz.ownerUid))
                   );
                   return (
                     <>
                       <LiveChatPanel
-                        threadKey={selected.threadKey}
-                        businessId={selected.businessId}
-                        listingId={selected.listingId}
-                        orderId={selected.orderId}
-                        bookingId={selected.bookingId}
-                        recipientUid={selected.otherPartyUid}
-                        title={selected.otherPartyName || selected.businessName}
-                        subtitle={
-                          selected.orderNumber
-                            ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
-                            : selected.listingTitle || selected.businessName
+                        threadKey={activeThreadKey}
+                        businessId={selected?.businessId}
+                        listingId={selected?.listingId}
+                        orderId={selected?.orderId}
+                        bookingId={selected?.bookingId}
+                        recipientUid={selected?.otherPartyUid}
+                        title={
+                          selected
+                            ? selected.otherPartyName || selected.businessName
+                            : activeThreadKey.startsWith('order:')
+                              ? 'Order Live Chat'
+                              : activeThreadKey.startsWith('booking:')
+                                ? 'Booking Live Chat'
+                                : 'Direct Message'
                         }
-                        initialLastSeenAt={selected.otherPartyLastSeenAt}
-                        initialActiveLastMinute={selected.otherPartyActiveLastMinute}
+                        subtitle={
+                          selected
+                            ? selected.orderNumber
+                              ? `Order ${selected.orderNumber} (${selected.orderStatus || 'ACTIVE'})`
+                              : selected.listingTitle || selected.businessName
+                            : 'Loading conversation...'
+                        }
+                        initialLastSeenAt={selected?.otherPartyLastSeenAt}
+                        initialActiveLastMinute={selected?.otherPartyActiveLastMinute}
                         placeholder={TRANSLATIONS[language].discover.writeReply}
                         onMessageSentOrReceived={() => loadThreadsOnly()}
                         onContractUpdated={() => setContractRefreshSignal((n) => n + 1)}
                       />
-                      {!selected.orderId && (
+                      {!selected?.orderId && (
                         <ContractOfferSection
-                          threadKey={selected.threadKey}
-                          businessId={selected.businessId}
-                          listingId={selected.listingId}
-                          bookingId={selected.bookingId}
-                          recipientUid={selected.otherPartyUid}
-                          defaultTitle={selected.listingTitle || selected.businessName}
+                          threadKey={activeThreadKey}
+                          businessId={selected?.businessId}
+                          listingId={selected?.listingId}
+                          bookingId={selected?.bookingId}
+                          recipientUid={selected?.otherPartyUid}
+                          defaultTitle={
+                            selected?.listingTitle || selected?.businessName || 'Service Request'
+                          }
                           isOwner={isThreadOwner}
                           compact
                           refreshSignal={contractRefreshSignal}

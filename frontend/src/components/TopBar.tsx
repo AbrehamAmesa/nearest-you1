@@ -228,17 +228,26 @@ export const TopBar: React.FC<TopBarProps> = ({
                       const isMessage = item.kind === 'message';
                       const isError = item.kind === 'error';
                       const ItemIcon = isMessage ? MessageSquare : Bell;
+                      const hasAction = Boolean(item.onAction || item.actionTarget || item.threadKey);
+                      const handleRowAction = () => {
+                        if (!hasAction) return;
+                        onExecuteNotificationAction(item);
+                        onCloseInbox();
+                      };
                       return (
                         <div
                           key={item.id}
+                          onClick={hasAction ? handleRowAction : undefined}
                           className={`flex items-start gap-3 px-4 py-3 transition-colors ${
+                            hasAction ? 'cursor-pointer' : ''
+                          } ${
                             !item.read
                               ? isMessage
-                                ? 'bg-emerald-50/70'
+                                ? `bg-emerald-50/70 ${hasAction ? 'hover:bg-emerald-100/70' : ''}`
                                 : isError
-                                  ? 'bg-red-50/75'
-                                  : 'bg-amber-50/60'
-                              : 'bg-white opacity-75'
+                                  ? `bg-red-50/75 ${hasAction ? 'hover:bg-red-100/60' : ''}`
+                                  : `bg-amber-50/60 ${hasAction ? 'hover:bg-amber-100/60' : ''}`
+                              : `bg-white opacity-75 ${hasAction ? 'hover:bg-[#F4F6F5]' : ''}`
                           }`}
                         >
                           <div
@@ -268,23 +277,28 @@ export const TopBar: React.FC<TopBarProps> = ({
                               {item.message}
                             </p>
                             <div className="mt-2 flex flex-wrap items-center gap-2">
-                              {(item.onAction || item.actionTarget) && item.actionLabel && (
+                              {hasAction && (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    onExecuteNotificationAction(item);
-                                    onCloseInbox();
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRowAction();
                                   }}
                                   className="inline-flex items-center gap-1 rounded-md bg-[#176B52] px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-[#125641]"
                                 >
-                                  <span>{item.actionLabel}</span>
+                                  <span>
+                                    {item.actionLabel || (isMessage ? 'Open Message' : 'View')}
+                                  </span>
                                   <ArrowRight className="h-3 w-3" />
                                 </button>
                               )}
                               {!item.read ? (
                                 <button
                                   type="button"
-                                  onClick={() => onMarkNotificationRead(item.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onMarkNotificationRead(item.id);
+                                  }}
                                   className="inline-flex items-center gap-1 rounded-md border border-[#172B3A]/15 bg-white px-2 py-1 text-[10px] font-semibold text-[#172B3A] hover:bg-[#F4F6F5]"
                                 >
                                   <CheckCheck className="h-3 w-3 text-[#176B52]" />

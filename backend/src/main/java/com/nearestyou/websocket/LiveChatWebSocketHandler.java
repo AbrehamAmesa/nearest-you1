@@ -49,6 +49,10 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         liveChatBroker.registerUserSession(principal.uid(), session);
+        String firebaseUid = principal.account() != null ? principal.account().getFirebaseUid() : null;
+        if (firebaseUid != null && !firebaseUid.isBlank() && !firebaseUid.equals(principal.uid())) {
+            liveChatBroker.registerUserSession(firebaseUid, session);
+        }
         userSyncService.touchUserPresence(principal.uid(), true);
         liveChatBroker.sendToSession(session, Map.of(
                 "type", "connected",
@@ -150,15 +154,25 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        UserPrincipal principal = (UserPrincipal) session.getAttributes().get("principal");
         String uid = (String) session.getAttributes().get("uid");
         liveChatBroker.unregisterSession(uid, session);
+        String firebaseUid = principal != null && principal.account() != null ? principal.account().getFirebaseUid() : null;
+        if (firebaseUid != null && !firebaseUid.isBlank() && !firebaseUid.equals(uid)) {
+            liveChatBroker.unregisterSession(firebaseUid, session);
+        }
         userSyncService.touchUserPresence(uid, true);
     }
 
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) {
+        UserPrincipal principal = (UserPrincipal) session.getAttributes().get("principal");
         String uid = (String) session.getAttributes().get("uid");
         liveChatBroker.unregisterSession(uid, session);
+        String firebaseUid = principal != null && principal.account() != null ? principal.account().getFirebaseUid() : null;
+        if (firebaseUid != null && !firebaseUid.isBlank() && !firebaseUid.equals(uid)) {
+            liveChatBroker.unregisterSession(firebaseUid, session);
+        }
         userSyncService.touchUserPresence(uid, true);
     }
 

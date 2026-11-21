@@ -3,8 +3,8 @@ import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { TopBar, type AppSection } from './components/TopBar.tsx';
 import { CustomerDiscoverView } from './components/CustomerDiscoverView.tsx';
 import { DeliveryTransportView } from './components/DeliveryTransportView.tsx';
-import { CustomerActivityView } from './components/CustomerActivityView.tsx';
-import { BusinessPortalView } from './components/BusinessPortalView.tsx';
+import { CustomerActivityView, type ActivityTab } from './components/CustomerActivityView.tsx';
+import { BusinessPortalView, type BusinessPortalTab } from './components/BusinessPortalView.tsx';
 import { AdminPortalView } from './components/AdminPortalView.tsx';
 import { CartDrawer } from './components/CartDrawer.tsx';
 import { CompareDrawer } from './components/CompareDrawer.tsx';
@@ -26,6 +26,7 @@ import type {
   Listing,
   LiveProviderPublicMarker,
   OnboardingGovernance,
+  OrderRecord,
   PlatformPolicy,
   RecommendedListingItem,
   ReviewItem,
@@ -134,9 +135,19 @@ const INITIAL_LOCATION: DetectedLocation = {
 function NearestYouWorkspace() {
   const { firebaseUser, dbUser, isAdmin, openAuthModal } = useAuth();
   const [activeSection, setActiveSection] = useState<AppSection>('discover');
-  const [businessInitialTab, setBusinessInitialTab] = useState<'PROVIDER_KYC' | 'CATALOG'>(
+  const [businessInitialTab, setBusinessInitialTab] = useState<BusinessPortalTab>(
     'PROVIDER_KYC'
   );
+  const [activityNav, setActivityNav] = useState<{
+    tab?: ActivityTab;
+    threadKey?: string | null;
+    signal: number;
+  }>({ signal: 0 });
+  const [businessNav, setBusinessNav] = useState<{
+    tab?: BusinessPortalTab;
+    threadKey?: string | null;
+    signal: number;
+  }>({ signal: 0 });
   const [categories, setCategories] = useState<Category[]>([]);
   const [documentRequirements, setDocumentRequirements] = useState<CategoryDocumentRequirement[]>(
     []
@@ -187,6 +198,9 @@ function NearestYouWorkspace() {
   const [notificationsInboxOpen, setNotificationsInboxOpen] = useState(false);
 
   const notificationStorageKey = `ny_notifications_v2_${dbUser?.uid || 'guest'}`;
+  const dismissedStorageKey = `ny_dismissed_notif_ids_${dbUser?.uid || 'guest'}`;
+  const dismissedEventIdsRef = useRef<Set<string>>(new Set());
+
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -197,9 +211,24 @@ function NearestYouWorkspace() {
       return [];
     }
   });
+  const notificationsRef = useRef(notifications);
+  notificationsRef.current = notifications;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    try {
+      const rawDismissed = window.localStorage.getItem(dismissedStorageKey);
+      if (rawDismissed) {
+        const parsed = JSON.parse(rawDismissed);
+        dismissedEventIdsRef.current = Array.isArray(parsed)
+          ? new Set(parsed.filter((x): x is string => typeof x === 'string'))
+          : new Set();
+      } else {
+        dismissedEventIdsRef.current = new Set();
+      }
+    } catch {
+      dismissedEventIdsRef.current = new Set();
+    }
     try {
       const raw = window.localStorage.getItem(notificationStorageKey);
       if (raw) {
@@ -210,7 +239,7 @@ function NearestYouWorkspace() {
     } catch {
       setNotifications([]);
     }
-  }, [notificationStorageKey]);
+  }, [notificationStorageKey, dismissedStorageKey]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -222,30 +251,68 @@ function NearestYouWorkspace() {
     }
   }, [notifications, notificationStorageKey]);
 
-  const markNotificationRead = useCallback((id: string) => {
-    setNotifications((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, read: true } : item))
-    );
-  }, []);
+  const recordDismissedEventIds = useCallback(
+    (eventIds: Array<string | undefined>) => {
+      const valid = eventIds.filter((x): x is string => Boolean(x && x.trim()));
+      if (valid.length === 0) return;
+      valid.forEach((id) => dismissedEventIdsRef.current.add(id));
+      if (dismissedEventIdsRef.current.size > 200) {
+        dismissedEventIdsRef.current = new Set(
+          Array.from(dismissedEventIdsRef.current).slice(-200)
+        );
+      }
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(
+            dismissedStorageKey,
+            JSON.stringify(Array.from(dismissedEventIdsRef.current))
+          );
+        } catch {
+          /* ignore quota error */
+        }
+      }
+    },
+    [dismissedStorageKey]
+  );
+
+  const markNotificationRead = useCallback(
+    (id: string) => {
+      const target = notificationsRef.current.find((item) => item.id === id);
+      if (target?.eventId) {
+        recordDismissedEventIds([target.eventId]);
+      }
+      setNotifications((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, read: true } : item))
+      );
+    },
+    [recordDismissedEventIds]
+  );
 
   const markAllNotificationsRead = useCallback(() => {
+    recordDismissedEventIds(notificationsRef.current.map((item) => item.eventId));
     setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
-  }, []);
+  }, [recordDismissedEventIds]);
 
   const clearReadNotifications = useCallback(() => {
+    recordDismissedEventIds(
+      notificationsRef.current.filter((item) => item.read).map((item) => item.eventId)
+    );
     setNotifications((prev) => prev.filter((item) => !item.read));
-  }, []);
+  }, [recordDismissedEventIds]);
 
   const pushNotification = useCallback(
     (
       input:
         | string
         | {
+            eventId?: string;
             kind?: NotificationKind;
             title?: string;
             message: string;
             actionLabel?: string;
             actionTarget?: AppSection;
+            targetTab?: string;
+            threadKey?: string;
             onAction?: () => void;
           }
     ) => {
@@ -253,6 +320,11 @@ function NearestYouWorkspace() {
       const explicitKind = typeof input !== 'string' ? input.kind : undefined;
       const classification = classifyNecessaryNotification(rawMessage, explicitKind);
       if (!classification.necessary) {
+        return;
+      }
+
+      const eventId = typeof input !== 'string' ? input.eventId : undefined;
+      if (eventId && dismissedEventIdsRef.current.has(eventId)) {
         return;
       }
 
@@ -264,6 +336,7 @@ function NearestYouWorkspace() {
 
       const entry: AppNotification = {
         id,
+        eventId,
         kind: classification.kind,
         title: (typeof input !== 'string' && input.title) || classification.defaultTitle,
         message: rawMessage,
@@ -271,25 +344,84 @@ function NearestYouWorkspace() {
         read: false,
         actionLabel: typeof input !== 'string' ? input.actionLabel : undefined,
         actionTarget: typeof input !== 'string' ? input.actionTarget : undefined,
+        targetTab: typeof input !== 'string' ? input.targetTab : undefined,
+        threadKey: typeof input !== 'string' ? input.threadKey : undefined,
         onAction: typeof input !== 'string' ? input.onAction : undefined,
       };
 
-      setNotifications((prev) => [...prev.slice(-29), entry]);
+      setNotifications((prev) => {
+        if (eventId && prev.some((n) => n.eventId === eventId)) {
+          return prev;
+        }
+        return [...prev.slice(-29), entry];
+      });
     },
     []
   );
 
+  const isVerifiedProvider =
+    dbUser?.providerVerificationStatus === 'VERIFIED' || Boolean(dbUser?.isAdmin);
+
   const executeNotificationAction = useCallback(
     (item: AppNotification) => {
       markNotificationRead(item.id);
+      setSelectedListing(null);
+      setCartOpen(false);
+      setCompareOpen(false);
+      setAccountOpen(false);
+      setJobSeekerModalOpen(false);
+      setNotificationsInboxOpen(false);
+
+      if (item.actionTarget === 'business') {
+        const resolvedTab =
+          (item.targetTab as BusinessPortalTab | undefined) ||
+          (item.kind === 'message' || item.threadKey
+            ? 'MESSAGES'
+            : isVerifiedProvider
+              ? 'CATALOG'
+              : 'PROVIDER_KYC');
+        setBusinessNav((prev) => ({
+          tab: resolvedTab,
+          threadKey: item.threadKey ?? null,
+          signal: prev.signal + 1,
+        }));
+        setActiveSection('business');
+        return;
+      }
+
+      if (item.actionTarget === 'activity') {
+        const resolvedTab =
+          (item.targetTab as ActivityTab | undefined) ||
+          (item.kind === 'message' || item.threadKey ? 'MESSAGES' : 'ORDERS');
+        setActivityNav((prev) => ({
+          tab: resolvedTab,
+          threadKey: item.threadKey ?? null,
+          signal: prev.signal + 1,
+        }));
+        setActiveSection('activity');
+        return;
+      }
+
+      if (item.actionTarget) {
+        setActiveSection(item.actionTarget);
+        return;
+      }
+
+      if (item.threadKey) {
+        setActivityNav((prev) => ({
+          tab: 'MESSAGES',
+          threadKey: item.threadKey ?? null,
+          signal: prev.signal + 1,
+        }));
+        setActiveSection('activity');
+        return;
+      }
+
       if (item.onAction) {
         item.onAction();
-      } else if (item.actionTarget) {
-        setSelectedListing(null);
-        setActiveSection(item.actionTarget);
       }
     },
-    [markNotificationRead]
+    [markNotificationRead, isVerifiedProvider]
   );
 
   const notify = useCallback(
@@ -568,8 +700,6 @@ function NearestYouWorkspace() {
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
   const comparedListings = listings.filter((l) => compareIds.includes(l.id));
   const activeLocationLabel = detectedLocation.label || detectedLocation.city || 'Addis Ababa';
-  const isVerifiedProvider =
-    dbUser?.providerVerificationStatus === 'VERIFIED' || Boolean(dbUser?.isAdmin);
 
   useEffect(() => {
     if (!firebaseUser || !dbUser) return;
@@ -580,54 +710,262 @@ function NearestYouWorkspace() {
     return () => window.clearInterval(timer);
   }, [firebaseUser, dbUser?.uid]);
 
-  useLiveChatInboxListener(
-    Boolean(firebaseUser && dbUser),
-    (incomingMsg) => {
-      if (!dbUser?.uid || incomingMsg.senderUid === dbUser.uid) return;
-      const ownsBusiness = businesses.some(
-        (b) => b.id === incomingMsg.businessId && b.ownerUid === dbUser.uid
-      );
-      const targetSection: AppSection =
-        ownsBusiness && isVerifiedProvider ? 'business' : 'activity';
+  useEffect(() => {
+    if (!firebaseUser || !dbUser?.uid) return;
+    let cancelled = false;
+    engagementApi
+      .getPendingNotifications()
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res.data) ? res.data : [];
+        for (const row of list) {
+          if (!row || typeof row !== 'object' || typeof row.message !== 'string') continue;
+          const kind: NotificationKind =
+            row.kind === 'message' || row.kind === 'error' || row.kind === 'offer'
+              ? row.kind
+              : 'offer';
+          const actionTarget: AppSection | undefined =
+            row.actionTarget === 'business' ||
+            row.actionTarget === 'activity' ||
+            row.actionTarget === 'delivery' ||
+            row.actionTarget === 'discover' ||
+            row.actionTarget === 'admin'
+              ? row.actionTarget
+              : undefined;
+          pushNotification({
+            eventId: typeof row.eventId === 'string' ? row.eventId : undefined,
+            kind,
+            title: typeof row.title === 'string' ? row.title : undefined,
+            message: row.message,
+            actionLabel: typeof row.actionLabel === 'string' ? row.actionLabel : undefined,
+            actionTarget,
+            targetTab: typeof row.targetTab === 'string' ? row.targetTab : undefined,
+            threadKey: typeof row.threadKey === 'string' ? row.threadKey : undefined,
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [firebaseUser, dbUser?.uid, pushNotification]);
+
+  const myUids = useMemo(
+    () =>
+      new Set(
+        [dbUser?.uid, dbUser?.firebaseUid, firebaseUser?.uid].filter(Boolean) as string[]
+      ),
+    [dbUser?.uid, dbUser?.firebaseUid, firebaseUser?.uid]
+  );
+
+  useLiveChatInboxListener(Boolean(firebaseUser && dbUser), {
+    onIncomingMessage: (incomingMsg, meta) => {
+      if (myUids.size === 0 || myUids.has(incomingMsg.senderUid)) return;
+      const ownsBusiness = meta?.ownerUid
+        ? myUids.has(meta.ownerUid)
+        : businesses.some((b) => b.id === incomingMsg.businessId && myUids.has(b.ownerUid));
+      const threadKey =
+        meta?.threadKey ||
+        incomingMsg.threadKey ||
+        (incomingMsg.orderId
+          ? `order:${incomingMsg.orderId}`
+          : incomingMsg.bookingId
+            ? `booking:${incomingMsg.bookingId}`
+            : `contact:${incomingMsg.businessId}:${incomingMsg.listingId || 0}:${incomingMsg.senderUid}`);
+      const targetSection: AppSection = ownsBusiness ? 'business' : 'activity';
       pushNotification({
+        eventId: `msg:${incomingMsg.id}`,
         kind: 'message',
         title: `New Message · ${incomingMsg.senderName}`,
         message:
           incomingMsg.body.length > 96
             ? `${incomingMsg.body.slice(0, 93)}...`
             : incomingMsg.body,
-        actionLabel: 'Open Messages',
+        actionLabel: 'Open Message',
         actionTarget: targetSection,
-        onAction: () => {
-          setSelectedListing(null);
-          if (targetSection === 'business') {
-            setBusinessInitialTab('CATALOG');
-          }
-          setActiveSection(targetSection);
-        },
+        targetTab: 'MESSAGES',
+        threadKey,
       });
     },
-    (contract) => {
-      if (!dbUser?.uid || contract.offeredByUid === dbUser.uid) return;
-      const ownsBusiness = dbUser.uid === contract.serviceGiverUid;
-      const targetSection: AppSection =
-        ownsBusiness && isVerifiedProvider ? 'business' : 'activity';
+    onContractUpdated: (contract, event) => {
+      if (myUids.size === 0) return;
+      if (event?.actorUid) {
+        if (myUids.has(event.actorUid)) return;
+      } else if (myUids.has(contract.offeredByUid)) {
+        return;
+      }
+      const ownsBusiness = myUids.has(contract.serviceGiverUid);
+      const targetSection: AppSection = ownsBusiness ? 'business' : 'activity';
       pushNotification({
+        eventId: `contract:${contract.id}:${contract.status}`,
         kind: 'offer',
         title: `Contract ${contract.status} · ${contract.contractReference}`,
         message: `${contract.title} · ${Number(contract.agreedAmount).toLocaleString()} ETB (${contract.contractType.replace(/_/g, ' ')})`,
-        actionLabel: 'View Contract',
+        actionLabel: 'Open Contract',
         actionTarget: targetSection,
-        onAction: () => {
-          setSelectedListing(null);
-          if (targetSection === 'business') {
-            setBusinessInitialTab('CATALOG');
-          }
-          setActiveSection(targetSection);
-        },
+        targetTab: 'MESSAGES',
+        threadKey: contract.threadKey,
       });
-    }
-  );
+    },
+    onOrderUpdated: (event) => {
+      if (myUids.size === 0) return;
+      if (event.actorUid && myUids.has(event.actorUid)) return;
+      const o = event.order;
+      const status = (o.orderStatus || '').toUpperCase();
+      const threadKey = event.threadKey || `order:${o.id}`;
+      const isReceiver = Boolean(event.ownerUid && myUids.has(event.ownerUid));
+      const isRequester = Boolean(event.customerUid && myUids.has(event.customerUid));
+
+      if (isReceiver && !isRequester) {
+        const isReq = status === 'REQUESTED' || status === 'PENDING';
+        const isImmediate = Boolean(o.immediateAcceptance && status === 'ACCEPTED');
+        pushNotification({
+          eventId: `order:${o.id}:${status}`,
+          kind: status === 'CANCELLED' ? 'error' : 'offer',
+          title: `${isReq ? 'New Order Request' : isImmediate ? 'New Immediate Order' : `Order ${status.replace(/_/g, ' ')}`} · ${o.orderNumber}`,
+          message: `${o.customerName} · ${Number(o.totalAmount).toLocaleString()} ETB (${o.fulfillmentType})`,
+          actionLabel: isReq ? 'Review Order' : 'Open Orders',
+          actionTarget: 'business',
+          targetTab: 'ORDERS',
+          threadKey,
+        });
+        return;
+      }
+
+      if (isRequester) {
+        const bizLabel = event.businessName || 'Seller';
+        const etaParts: string[] = [];
+        if (o.estimatedReadyMinutes) etaParts.push(`Ready ~${o.estimatedReadyMinutes}m`);
+        if (o.estimatedDeliveryMinutes && o.fulfillmentType === 'DELIVERY') {
+          etaParts.push(`Delivery ~${o.estimatedDeliveryMinutes}m`);
+        }
+        const detail =
+          status === 'REJECTED'
+            ? `${bizLabel}${o.rejectionReason ? `: ${o.rejectionReason}` : ' declined the order.'}`
+            : `${bizLabel} · ${status.replace(/_/g, ' ')}${etaParts.length > 0 ? ` (${etaParts.join(' · ')})` : ''}`;
+        pushNotification({
+          eventId: `order:${o.id}:${status}`,
+          kind: status === 'REJECTED' ? 'error' : 'offer',
+          title: `Order ${status.replace(/_/g, ' ')} · ${o.orderNumber}`,
+          message: detail,
+          actionLabel: 'View Order',
+          actionTarget: 'activity',
+          targetTab: 'ORDERS',
+          threadKey,
+        });
+      }
+    },
+    onBookingUpdated: (event) => {
+      if (myUids.size === 0) return;
+      if (event.actorUid && myUids.has(event.actorUid)) return;
+      const b = event.booking;
+      const status = (b.bookingStatus || '').toUpperCase();
+      const threadKey = event.threadKey || `booking:${b.id}`;
+      const isReceiver = Boolean(event.ownerUid && myUids.has(event.ownerUid));
+      const isRequester = Boolean(event.customerUid && myUids.has(event.customerUid));
+      const serviceLabel = event.listingTitle || b.bookingType;
+
+      if (isReceiver && !isRequester) {
+        pushNotification({
+          eventId: `booking:${b.id}:${status}`,
+          kind: status === 'CANCELLED' ? 'error' : 'offer',
+          title: `Service Request ${status} · ${b.bookingReference}`,
+          message: `${b.customerName} · ${serviceLabel} (${Number(b.agreedPrice).toLocaleString()} ETB)`,
+          actionLabel: 'View Request',
+          actionTarget: 'business',
+          targetTab: 'BOOKINGS',
+          threadKey,
+        });
+        return;
+      }
+
+      if (isRequester) {
+        const bizLabel = event.businessName || 'Provider';
+        const displayPrice = b.quotedPrice ? Number(b.quotedPrice) : Number(b.agreedPrice);
+        pushNotification({
+          eventId: `booking:${b.id}:${status}`,
+          kind: status === 'CANCELLED' ? 'error' : 'offer',
+          title: `${status === 'QUOTED' ? 'Quote Received' : `Booking ${status}`} · ${b.bookingReference}`,
+          message: `${bizLabel} · ${serviceLabel} (${displayPrice.toLocaleString()} ETB)`,
+          actionLabel: 'View Booking',
+          actionTarget: 'activity',
+          targetTab: 'BOOKINGS',
+          threadKey,
+        });
+      }
+    },
+    onApplicationUpdated: (event) => {
+      if (myUids.size === 0) return;
+      if (event.actorUid && myUids.has(event.actorUid)) return;
+      const app = event.application;
+      const status = (app.applicationStatus || '').toUpperCase();
+      const isEmployer = Boolean(event.ownerUid && myUids.has(event.ownerUid));
+      const isApplicant = Boolean(event.applicantUid && myUids.has(event.applicantUid));
+
+      if (isEmployer && !isApplicant) {
+        pushNotification({
+          eventId: `app:${app.id}:${status}`,
+          kind: 'offer',
+          title: `New Job Application · ${app.applicantName}`,
+          message: `${event.listingTitle || 'Job Vacancy'} · Expected ${Number(app.expectedCompensation).toLocaleString()} ETB`,
+          actionLabel: 'Review Applicant',
+          actionTarget: 'business',
+          targetTab: 'RECRUITMENT',
+        });
+        return;
+      }
+
+      if (isApplicant) {
+        pushNotification({
+          eventId: `app:${app.id}:${status}`,
+          kind: status === 'REJECTED' ? 'error' : 'offer',
+          title: `Application ${status.replace(/_/g, ' ')}`,
+          message: `${event.listingTitle || 'Job'} · ${event.businessName || 'Employer'}`,
+          actionLabel: 'View Application',
+          actionTarget: 'activity',
+          targetTab: 'JOBS',
+        });
+      }
+    },
+    onDeliveryUpdated: (event) => {
+      if (myUids.size === 0) return;
+      if (event.actorUid && myUids.has(event.actorUid)) return;
+      const d = event.delivery;
+      const status = (d.status || '').toUpperCase();
+      const isDriver = Boolean(d.driverUid && myUids.has(d.driverUid));
+      const isSender = Boolean(d.customerUid && myUids.has(d.customerUid));
+      const actionKey = `${d.id}:${status}:${event.action || ''}`;
+
+      if (isDriver && !isSender) {
+        pushNotification({
+          eventId: `delivery:driver:${actionKey}`,
+          kind: status === 'DISPUTED' || status === 'CANCELLED' ? 'error' : 'offer',
+          title: `Dispatch ${d.trackingCode} · ${event.action || status}`,
+          message:
+            event.action === 'DISPUTED' && d.disputeReason
+              ? `Dispute opened: ${d.disputeReason}`
+              : `${d.pickupLocation || ''} → ${d.destinationLocation || ''}`,
+          actionLabel: 'Open Dispatch',
+          actionTarget: 'delivery',
+        });
+        return;
+      }
+
+      if (isSender) {
+        pushNotification({
+          eventId: `delivery:customer:${actionKey}`,
+          kind: status === 'DISPUTED' || status === 'CANCELLED' ? 'error' : 'offer',
+          title: `Delivery ${d.trackingCode} · ${status.replace(/_/g, ' ')}`,
+          message: d.driverName
+            ? `Partner: ${d.driverName} · ${d.pickupLocation || ''} → ${d.destinationLocation || ''}`
+            : `${d.pickupLocation || ''} → ${d.destinationLocation || ''}`,
+          actionLabel: 'View Delivery',
+          actionTarget: 'activity',
+          targetTab: 'DELIVERIES',
+        });
+      }
+    },
+  });
 
   const handleOpenJobSeekerAdvertise = () => {
     if (!firebaseUser) {
@@ -728,6 +1066,9 @@ function NearestYouWorkspace() {
             businesses={businesses}
             listings={listings}
             language={language}
+            requestedTab={activityNav.tab}
+            requestedThreadKey={activityNav.threadKey}
+            navSignal={activityNav.signal}
             onNotify={notify}
             onRefreshCatalog={() => loadCatalog()}
             onOpenJobSeekerAdvertise={handleOpenJobSeekerAdvertise}
@@ -747,6 +1088,9 @@ function NearestYouWorkspace() {
             governance={governance}
             language={language}
             initialTab={businessInitialTab}
+            requestedTab={businessNav.tab}
+            requestedThreadKey={businessNav.threadKey}
+            navSignal={businessNav.signal}
             onRefreshCatalog={() => loadCatalog()}
             onNotify={notify}
             onEditListing={(item) => {
@@ -785,15 +1129,26 @@ function NearestYouWorkspace() {
         userLng={detectedLocation.lng}
         subCityName={activeLocationLabel}
         policy={policy}
-        onOrderSuccess={(refs) => {
-          pushNotification({
-            kind: 'offer',
-            title: 'Offer & Order Delivered',
-            message: `Order confirmed: ${refs.join(', ')}`,
-            actionLabel: 'View Orders',
-            actionTarget: 'activity',
-            onAction: () => setActiveSection('activity'),
+        onOrderSuccess={(createdOrders: OrderRecord[]) => {
+          createdOrders.forEach((order) => {
+            pushNotification({
+              eventId: `order:${order.id}:${order.orderStatus || 'REQUESTED'}`,
+              kind: 'offer',
+              title: `${order.immediateAcceptance ? 'Immediate Order Accepted' : 'Order Request Sent'} · ${order.orderNumber}`,
+              message: `${Number(order.totalAmount).toLocaleString()} ETB (${order.fulfillmentType})${
+                order.estimatedReadyMinutes ? ` · Ready ~${order.estimatedReadyMinutes}m` : ''
+              }`,
+              actionLabel: 'View Order',
+              actionTarget: 'activity',
+              targetTab: 'ORDERS',
+              threadKey: `order:${order.id}`,
+            });
           });
+          setActivityNav((prev) => ({
+            tab: 'ORDERS',
+            threadKey: null,
+            signal: prev.signal + 1,
+          }));
           setActiveSection('activity');
         }}
       />
@@ -824,18 +1179,38 @@ function NearestYouWorkspace() {
           setListingInitialEditMode(false);
         }}
         onAddToCart={handleAddToCart}
-        onActionSuccess={notify}
-        onMessageDelivered={({ recipientLabel, preview }) => {
+        onActionSuccess={(msg) => {
+          if (/^Service request |^Booking /i.test(msg)) {
+            pushNotification({
+              kind: 'offer',
+              title: 'Service Request Sent',
+              message: msg,
+              actionLabel: 'View Bookings',
+              actionTarget: 'activity',
+              targetTab: 'BOOKINGS',
+            });
+          } else if (/^Application offer /i.test(msg)) {
+            pushNotification({
+              kind: 'offer',
+              title: 'Application Submitted',
+              message: msg,
+              actionLabel: 'View Applications',
+              actionTarget: 'activity',
+              targetTab: 'JOBS',
+            });
+          } else {
+            notify(msg);
+          }
+        }}
+        onMessageDelivered={({ recipientLabel, preview, threadKey }) => {
           pushNotification({
             kind: 'message',
             title: `Message Delivered · ${recipientLabel}`,
             message: preview.length > 90 ? `${preview.slice(0, 87)}...` : preview,
-            actionLabel: 'View Chat',
+            actionLabel: 'Open Message',
             actionTarget: 'activity',
-            onAction: () => {
-              setSelectedListing(null);
-              setActiveSection('activity');
-            },
+            targetTab: 'MESSAGES',
+            threadKey,
           });
         }}
         onListingUpdated={(updated) => {

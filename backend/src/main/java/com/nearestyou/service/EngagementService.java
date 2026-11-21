@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -498,7 +499,11 @@ public class EngagementService {
         app.setExpectedCompensation(req.expectedCompensation().setScale(2, RoundingMode.HALF_UP));
         app.setCoverLetter(req.coverLetter().trim());
         app.setApplicationStatus("SUBMITTED");
-        return appRepo.save(app);
+        JobApplication saved = appRepo.save(app);
+        if (jobBiz != null) {
+            liveChatBroker.broadcastApplicationEvent(saved, jobBiz, listing.getTitle(), principal.uid(), "SUBMITTED");
+        }
+        return saved;
     }
 
     @Transactional
@@ -512,7 +517,12 @@ public class EngagementService {
                     "Permission denied: only the hiring business owner or admin can update applicant status.");
         }
         app.setApplicationStatus(applicationStatus);
-        return appRepo.save(app);
+        JobApplication saved = appRepo.save(app);
+        String listingTitle = listingRepo.findById(saved.getListingId())
+                .map(ServiceListing::getTitle)
+                .orElse("Job Vacancy");
+        liveChatBroker.broadcastApplicationEvent(saved, biz, listingTitle, principal.uid(), "STATUS_UPDATED");
+        return saved;
     }
 
     @Transactional
@@ -716,7 +726,7 @@ public class EngagementService {
                 "Contract Offer (" + contractRef + "): " + saved.getTitle() + " · " + saved.getContractType().replace("_", " ")
                         + " · " + saved.getAgreedAmount() + " ETB (" + saved.getPaymentSchedule().replace("_", " ") + ")"
         );
-        liveChatBroker.broadcastContractEvent(saved, saved.getClientUid(), saved.getServiceGiverUid());
+        liveChatBroker.broadcastContractEvent(saved, saved.getClientUid(), saved.getServiceGiverUid(), principal.uid());
         return saved;
     }
 
@@ -819,7 +829,7 @@ public class EngagementService {
 
         ServiceContract saved = contractRepo.save(contract);
         postContractThreadMessage(principal, saved, timelineBody);
-        liveChatBroker.broadcastContractEvent(saved, saved.getClientUid(), saved.getServiceGiverUid());
+        liveChatBroker.broadcastContractEvent(saved, saved.getClientUid(), saved.getServiceGiverUid(), principal.uid());
         return saved;
     }
 
@@ -954,5 +964,233 @@ public class EngagementService {
             return acc.getFullName().trim();
         }
         return fallback;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getPendingNotifications(UserPrincipal principal) {
+        String uid = principal.uid();
+        Set<String> myUids = new HashSet<>();
+        if (uid != null && !uid.isBlank()) myUids.add(uid);
+        if (principal.account() != null && principal.account().getFirebaseUid() != null
+                && !principal.account().getFirebaseUid().isBlank()) {
+            myUids.add(principal.account().getFirebaseUid());
+        }
+
+        Instant sevenDaysAgo = Instant.now().minus(Duration.ofDays(7));
+        Instant oneDayAgo = Instant.now().minus(Duration.ofDays(1));
+        List<Map<String, Object>> items = new ArrayList<>();
+
+        Map<Long, Business> bizMap = new HashMap<>();
+        for (Business b : businessRepo.findAll()) bizMap.put(b.getId(), b);
+
+        Map<Long, ServiceListing> listingMap = new HashMap<>();
+        for (ServiceListing l : listingRepo.findAll()) listingMap.put(l.getId(), l);
+
+        List<Business> owned = businessRepo.findByOwnerUidOrderByIdAsc(uid);
+        List<Long> ownedBizIds = new ArrayList<>();
+        for (Business b : owned) ownedBizIds.add(b.getId());
+
+        // 1. Incoming latest messages per conversation thread where counterparty spoke last
+        for (Map<String, Object> th : getChatThreads(principal)) {
+            if (!(th.get("lastMessage") instanceof Message last)) continue;
+            if (myUids.contains(last.getSenderUid())) continue;
+            if (last.getCreatedAt() != null && last.getCreatedAt().isBefore(sevenDaysAgo)) continue;
+            boolean viewerIsOwner = Boolean.TRUE.equals(th.get("viewerIsOwner"));
+            String threadKey = String.valueOf(th.get("threadKey"));
+            String body = last.getBody() != null ? last.getBody() : "";
+            String preview = body.length() > 96 ? body.substring(0, 93) + "..." : body;
+            String senderLabel = last.getSenderName() != null ? last.getSenderName() : "User";
+            items.add(buildNotificationMap(
+                    "msg:" + last.getId(),
+                    "message",
+                    "New Message · " + senderLabel,
+                    preview,
+                    viewerIsOwner ? "business" : "activity",
+                    "MESSAGES",
+                    threadKey,
+                    "Open Message",
+                    last.getCreatedAt() != null ? last.getCreatedAt() : Instant.now()
+            ));
+        }
+
+        // 2. Order Receiver (business owner) actionable orders
+        if (!ownedBizIds.isEmpty()) {
+            for (CustomerOrder o : orderRepo.findByBusinessIdInOrderByCreatedAtDesc(ownedBizIds)) {
+                if (myUids.contains(o.getCustomerUid())) continue;
+                String st = o.getOrderStatus() != null ? o.getOrderStatus().toUpperCase(Locale.ROOT) : "";
+                boolean isRequest = "REQUESTED".equals(st) || "PENDING".equals(st);
+                boolean isRecentImmediate = o.isImmediateAcceptance() && "ACCEPTED".equals(st)
+                        && o.getCreatedAt() != null && o.getCreatedAt().isAfter(oneDayAgo);
+                if (!isRequest && !isRecentImmediate) continue;
+                items.add(buildNotificationMap(
+                        "order:" + o.getId() + ":" + st,
+                        "offer",
+                        (isRequest ? "New Order Request · " : "New Immediate Order · ") + o.getOrderNumber(),
+                        o.getCustomerName() + " · " + o.getTotalAmount() + " ETB (" + o.getFulfillmentType() + ")",
+                        "business",
+                        "ORDERS",
+                        "order:" + o.getId(),
+                        isRequest ? "Review Order" : "Open Orders",
+                        o.getCreatedAt() != null ? o.getCreatedAt() : Instant.now()
+                ));
+            }
+
+            // 3. Service Receiver (business owner) bookings
+            for (Booking b : bookingRepo.findByBusinessIdInOrderByCreatedAtDesc(ownedBizIds)) {
+                if (myUids.contains(b.getCustomerUid())) continue;
+                String st = b.getBookingStatus() != null ? b.getBookingStatus().toUpperCase(Locale.ROOT) : "";
+                boolean isPending = "PENDING".equals(st);
+                boolean isRecentConfirmed = ("CONFIRMED".equals(st) || "QUOTED".equals(st))
+                        && b.getCreatedAt() != null && b.getCreatedAt().isAfter(oneDayAgo);
+                if (!isPending && !isRecentConfirmed) continue;
+                ServiceListing lst = listingMap.get(b.getListingId());
+                String titleLabel = lst != null ? lst.getTitle() : b.getBookingType();
+                items.add(buildNotificationMap(
+                        "booking:" + b.getId() + ":" + st,
+                        "offer",
+                        "Service Request · " + b.getBookingReference(),
+                        b.getCustomerName() + " requested " + titleLabel + " (" + b.getAgreedPrice() + " ETB)",
+                        "business",
+                        "BOOKINGS",
+                        "booking:" + b.getId(),
+                        "View Request",
+                        b.getCreatedAt() != null ? b.getCreatedAt() : Instant.now()
+                ));
+            }
+
+            // 4. Employer submitted job applications
+            for (JobApplication a : appRepo.findByBusinessIdInOrderByCreatedAtDesc(ownedBizIds)) {
+                if (!"SUBMITTED".equalsIgnoreCase(a.getApplicationStatus())) continue;
+                if (a.getCreatedAt() != null && a.getCreatedAt().isBefore(sevenDaysAgo)) continue;
+                ServiceListing lst = listingMap.get(a.getListingId());
+                items.add(buildNotificationMap(
+                        "app:" + a.getId() + ":" + a.getApplicationStatus(),
+                        "offer",
+                        "New Job Application · " + a.getApplicantName(),
+                        (lst != null ? lst.getTitle() : "Job Vacancy") + " · Expected " + a.getExpectedCompensation() + " ETB",
+                        "business",
+                        "RECRUITMENT",
+                        null,
+                        "Review Applicant",
+                        a.getCreatedAt() != null ? a.getCreatedAt() : Instant.now()
+                ));
+            }
+        }
+
+        // 5. Requester (customer) order updates
+        for (CustomerOrder o : orderRepo.findByCustomerUidOrderByCreatedAtDesc(uid)) {
+            if (o.getCreatedAt() != null && o.getCreatedAt().isBefore(sevenDaysAgo)) continue;
+            String st = o.getOrderStatus() != null ? o.getOrderStatus().toUpperCase(Locale.ROOT) : "";
+            if (!Set.of("ACCEPTED", "PREPARING", "READY", "OUT_FOR_DELIVERY", "REJECTED", "COMPLETED").contains(st)) {
+                continue;
+            }
+            Business biz = bizMap.get(o.getBusinessId());
+            String bizName = biz != null ? biz.getBusinessName() : "Seller";
+            String detail = "REJECTED".equals(st)
+                    ? bizName + (o.getRejectionReason() != null ? ": " + o.getRejectionReason() : " declined the order.")
+                    : bizName + " · " + st.replace("_", " ")
+                    + (o.getEstimatedReadyMinutes() != null ? " (Ready ~" + o.getEstimatedReadyMinutes() + "m)" : "");
+            items.add(buildNotificationMap(
+                    "order:" + o.getId() + ":" + st,
+                    "REJECTED".equals(st) ? "error" : "offer",
+                    "Order " + st.replace("_", " ") + " · " + o.getOrderNumber(),
+                    detail,
+                    "activity",
+                    "ORDERS",
+                    "order:" + o.getId(),
+                    "View Order",
+                    o.getCreatedAt() != null ? o.getCreatedAt() : Instant.now()
+            ));
+        }
+
+        // 6. Requester (customer) booking updates
+        for (Booking b : bookingRepo.findByCustomerUidOrderByCreatedAtDesc(uid)) {
+            if (b.getCreatedAt() != null && b.getCreatedAt().isBefore(sevenDaysAgo)) continue;
+            String st = b.getBookingStatus() != null ? b.getBookingStatus().toUpperCase(Locale.ROOT) : "";
+            if (!Set.of("QUOTED", "CONFIRMED", "COMPLETED", "CANCELLED").contains(st)) continue;
+            Business biz = bizMap.get(b.getBusinessId());
+            ServiceListing lst = listingMap.get(b.getListingId());
+            String titleLabel = lst != null ? lst.getTitle() : b.getBookingType();
+            items.add(buildNotificationMap(
+                    "booking:" + b.getId() + ":" + st,
+                    "offer",
+                    ("QUOTED".equals(st) ? "Quote Received · " : "Booking " + st + " · ") + b.getBookingReference(),
+                    (biz != null ? biz.getBusinessName() : "Provider") + " · " + titleLabel + " (" + b.getAgreedPrice() + " ETB)",
+                    "activity",
+                    "BOOKINGS",
+                    "booking:" + b.getId(),
+                    "View Booking",
+                    b.getCreatedAt() != null ? b.getCreatedAt() : Instant.now()
+            ));
+        }
+
+        // 7. Pending contracts from counterparty
+        for (ServiceContract c : contractRepo.findByClientUidOrServiceGiverUidOrderByUpdatedAtDesc(uid, uid)) {
+            if (myUids.contains(c.getOfferedByUid())) continue;
+            if (c.getUpdatedAt() != null && c.getUpdatedAt().isBefore(sevenDaysAgo)) continue;
+            if (!Set.of("OFFERED", "COUNTERED").contains(c.getStatus().toUpperCase(Locale.ROOT))) continue;
+            boolean viewerIsOwner = myUids.contains(c.getServiceGiverUid());
+            items.add(buildNotificationMap(
+                    "contract:" + c.getId() + ":" + c.getStatus(),
+                    "offer",
+                    "Contract " + c.getStatus() + " · " + c.getContractReference(),
+                    c.getTitle() + " · " + c.getAgreedAmount() + " ETB",
+                    viewerIsOwner ? "business" : "activity",
+                    "MESSAGES",
+                    c.getThreadKey(),
+                    "Open Contract",
+                    c.getUpdatedAt() != null ? c.getUpdatedAt() : Instant.now()
+            ));
+        }
+
+        // 8. Applicant job status updates
+        for (JobApplication a : appRepo.findByApplicantUidOrderByCreatedAtDesc(uid)) {
+            if (a.getCreatedAt() != null && a.getCreatedAt().isBefore(sevenDaysAgo)) continue;
+            if ("SUBMITTED".equalsIgnoreCase(a.getApplicationStatus())) continue;
+            Business biz = bizMap.get(a.getBusinessId());
+            ServiceListing lst = listingMap.get(a.getListingId());
+            items.add(buildNotificationMap(
+                    "app:" + a.getId() + ":" + a.getApplicationStatus(),
+                    "REJECTED".equalsIgnoreCase(a.getApplicationStatus()) ? "error" : "offer",
+                    "Application " + a.getApplicationStatus().replace("_", " "),
+                    (lst != null ? lst.getTitle() : "Job") + " · " + (biz != null ? biz.getBusinessName() : "Employer"),
+                    "activity",
+                    "JOBS",
+                    null,
+                    "View Application",
+                    a.getCreatedAt() != null ? a.getCreatedAt() : Instant.now()
+            ));
+        }
+
+        items.sort(Comparator.comparingLong(m -> ((Number) m.getOrDefault("createdAtMs", 0L)).longValue()));
+        if (items.size() > 20) {
+            return items.subList(items.size() - 20, items.size());
+        }
+        return items;
+    }
+
+    private Map<String, Object> buildNotificationMap(
+            String eventId,
+            String kind,
+            String title,
+            String message,
+            String actionTarget,
+            String targetTab,
+            String threadKey,
+            String actionLabel,
+            Instant timestamp
+    ) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("eventId", eventId);
+        out.put("kind", kind);
+        out.put("title", title);
+        out.put("message", message);
+        out.put("actionTarget", actionTarget);
+        out.put("targetTab", targetTab);
+        out.put("threadKey", threadKey);
+        out.put("actionLabel", actionLabel);
+        out.put("createdAt", timestamp.toString());
+        out.put("createdAtMs", timestamp.toEpochMilli());
+        return out;
     }
 }

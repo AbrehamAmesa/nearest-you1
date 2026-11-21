@@ -52,7 +52,11 @@ interface ListingDetailModalProps {
   onClose: () => void;
   onAddToCart: (listing: Listing, business: Business, variant?: string) => void;
   onActionSuccess: (message: string) => void;
-  onMessageDelivered?: (info: { recipientLabel: string; preview: string }) => void;
+  onMessageDelivered?: (info: {
+    recipientLabel: string;
+    preview: string;
+    threadKey: string;
+  }) => void;
   onListingUpdated?: (updated: Listing) => void;
 }
 
@@ -1598,6 +1602,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                               onMessageDelivered?.({
                                 recipientLabel: messageTimeLabel,
                                 preview: text,
+                                threadKey: contactThreadKey,
                               })
                             }
                             onContractUpdated={() => setContractRefreshSignal((n) => n + 1)}
@@ -1927,6 +1932,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                           onMessageDelivered?.({
                             recipientLabel: messageTimeLabel,
                             preview: text,
+                            threadKey: contactThreadKey,
                           })
                         }
                       />
