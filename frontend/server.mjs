@@ -136,7 +136,13 @@ function proxyApiRequest(req, res) {
 
   const targetPort = Number(targetUrl.port) || (targetUrl.protocol === 'https:' ? 443 : 80);
   const isLoopback = targetUrl.hostname === '127.0.0.1' || targetUrl.hostname === 'localhost';
-  if ((isLoopback && targetPort === port) || req.headers['x-ny-proxy-hop']) {
+  const isNginxLoopTarget =
+    !process.env.VITE_API_PROXY_TARGET &&
+    !process.env.API_PROXY_TARGET &&
+    process.env.NGINX_PORT === '8080' &&
+    isLoopback &&
+    targetPort === 8080;
+  if ((isLoopback && targetPort === port) || req.headers['x-ny-proxy-hop'] || isNginxLoopTarget) {
     sendJson(res, 503, { error: 'Backend API service is not configured or unavailable' });
     return;
   }

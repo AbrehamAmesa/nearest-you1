@@ -60,6 +60,7 @@ interface CustomerDiscoverViewProps {
   recommendations: RecommendedListingItem[];
   detectedLocation: DetectedLocation;
   detectingLocation: boolean;
+  gpsError?: string | null;
   loading: boolean;
   isSignedIn: boolean;
   isVerifiedProvider?: boolean;
@@ -128,6 +129,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
   recommendations,
   detectedLocation,
   detectingLocation,
+  gpsError = null,
   loading,
   isSignedIn,
   isVerifiedProvider = false,
@@ -598,29 +600,53 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
             </div>
 
             <div className="mt-7 space-y-3.5">
-              {/* Backend-Resolved Exact Location Readout (No manual sub-city dropdown) */}
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#176B52]/20 bg-[#F4F6F5] px-3.5 py-2.5 text-xs">
-                <div className="flex min-w-0 items-center gap-2 text-[#172B3A]">
-                  <MapPin className="h-4 w-4 shrink-0 text-[#176B52]" />
-                  <span className="font-medium text-[#172B3A]/70">{t.detectedLocationLabel}:</span>
-                  <span className="truncate font-semibold text-[#172B3A]">
-                    {detectingLocation && detectedLocation.source === 'CITY_CENTER'
-                      ? t.detectingLocation
-                      : locationDisplay}
-                  </span>
-                  <span className="hidden font-mono text-[11px] text-[#176B52] tabular-nums sm:inline">
-                    ({detectedLocation.lat.toFixed(4)}, {detectedLocation.lng.toFixed(4)})
-                  </span>
+              {/* Exact GPS Location Readout */}
+              <div className="space-y-1.5">
+                <div className="flex flex-col gap-2.5 rounded-lg border border-[#176B52]/20 bg-[#F4F6F5] px-3.5 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[#172B3A]">
+                    <MapPin className="h-4 w-4 shrink-0 text-[#176B52]" />
+                    <span className="font-medium text-[#172B3A]/70">{t.detectedLocationLabel}:</span>
+                    <span className="font-semibold text-[#172B3A] break-words">
+                      {detectingLocation ? t.detectingLocation : locationDisplay}
+                    </span>
+                    <span className="font-mono text-[11px] text-[#176B52] tabular-nums">
+                      ({detectedLocation.lat.toFixed(5)}, {detectedLocation.lng.toFixed(5)})
+                    </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                        detectedLocation.source === 'GPS'
+                          ? 'bg-[#176B52]/12 text-[#176B52]'
+                          : 'bg-[#172B3A]/10 text-[#172B3A]/70'
+                      }`}
+                    >
+                      {detectedLocation.source === 'GPS'
+                        ? detectedLocation.accuracyMeters
+                          ? `Exact GPS · ±${detectedLocation.accuracyMeters}m`
+                          : 'Exact GPS'
+                        : detectedLocation.source === 'IP_GEOLOCATION'
+                          ? 'Approx. IP'
+                          : detectedLocation.source === 'SAVED_PROFILE'
+                            ? 'Saved'
+                            : 'Default'}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={detectingLocation}
+                    onClick={onRefreshLocation}
+                    className="inline-flex min-h-[36px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-md border border-[#172B3A]/15 bg-white px-3 py-1 text-[11px] font-semibold text-[#176B52] hover:bg-emerald-50/60 disabled:opacity-60 whitespace-nowrap shrink-0"
+                  >
+                    <Navigation className={`h-3 w-3 shrink-0 ${detectingLocation ? 'animate-spin' : ''}`} />
+                    <span>{detectingLocation ? t.detectingLocation : t.refreshGps}</span>
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={onRefreshLocation}
-                  className="inline-flex min-h-[34px] items-center gap-1.5 rounded-md border border-[#172B3A]/15 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#176B52] hover:bg-emerald-50/60 whitespace-nowrap shrink-0"
-                >
-                  <Navigation className="h-3 w-3" />
-                  {t.refreshGps}
-                </button>
+                {gpsError && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900">
+                    {gpsError}
+                  </p>
+                )}
               </div>
 
               {/* Full-Width Nearest-First Search Input + Scan Image / Open Camera Actions */}

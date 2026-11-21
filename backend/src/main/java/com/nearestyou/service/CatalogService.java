@@ -924,7 +924,7 @@ public class CatalogService {
     }
 
     private CachedAreaLabel reverseGeocodeArea(double lat, double lng) {
-        String key = String.format(Locale.US, "%.3f,%.3f", lat, lng);
+        String key = String.format(Locale.US, "%.4f,%.4f", lat, lng);
         long now = Instant.now().toEpochMilli();
         CachedAreaLabel cached = reverseGeoCache.get(key);
         if (cached != null && cached.expiresAtMs() > now) {
@@ -933,6 +933,95 @@ public class CatalogService {
         if (reverseGeoCache.size() > 500) {
             reverseGeoCache.clear();
         }
+
+        // 1. Try exact street/neighborhood reverse-geocoding first (Nominatim zoom=18)
+        try {
+            String url = String.format(
+                    Locale.US,
+                    "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=%.6f&lon=%.6f&zoom=18&addressdetails=1",
+                    lat,
+                    lng
+            );
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofMillis(2600))
+                    .header("User-Agent", "NearestYouEthiopia/1.0")
+                    .header("Accept-Language", "en")
+                    .GET()
+                    .build();
+            HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() >= 200 && res.statusCode() < 300) {
+                JsonNode root = objectMapper.readTree(res.body());
+                JsonNode addr = root.path("address");
+                String houseNum = safeStr(addr.path("house_number").asText("")).trim();
+                String road = firstNonBlank(
+                        addr.path("road").asText(""),
+                        addr.path("pedestrian").asText(""),
+                        addr.path("residential").asText(""),
+                        addr.path("footway").asText("")
+                );
+                String roadWithNumber = (!houseNum.isEmpty() && !road.isEmpty())
+                        ? (houseNum + " " + road)
+                        : road;
+                String exactSpot = firstNonBlank(
+                        addr.path("amenity").asText(""),
+                        addr.path("building").asText(""),
+                        addr.path("shop").asText(""),
+                        addr.path("office").asText(""),
+                        roadWithNumber,
+                        addr.path("neighbourhood").asText("")
+                );
+                String subCity = firstNonBlank(
+                        addr.path("suburb").asText(""),
+                        addr.path("city_district").asText(""),
+                        addr.path("borough").asText(""),
+                        addr.path("quarter").asText(""),
+                        addr.path("neighbourhood").asText("")
+                );
+                String city = firstNonBlank(
+                        addr.path("city").asText(""),
+                        addr.path("town").asText(""),
+                        addr.path("village").asText(""),
+                        addr.path("county").asText(""),
+                        addr.path("state").asText(""),
+                        addr.path("country").asText("")
+                );
+
+                List<String> parts = new ArrayList<>();
+                if (!exactSpot.isBlank()) parts.add(exactSpot);
+                if (!subCity.isBlank() && parts.stream().noneMatch(p -> p.equalsIgnoreCase(subCity))) {
+                    parts.add(subCity);
+                }
+                if (!city.isBlank() && parts.stream().noneMatch(p -> p.equalsIgnoreCase(city))) {
+                    parts.add(city);
+                }
+                String label = String.join(", ", parts);
+                if (label.isBlank()) {
+                    String displayName = safeStr(root.path("display_name").asText("")).trim();
+                    if (!displayName.isEmpty()) {
+                        String[] rawSegments = displayName.split(",");
+                        List<String> concise = new ArrayList<>();
+                        for (int i = 0; i < Math.min(3, rawSegments.length); i++) {
+                            String seg = rawSegments[i].trim();
+                            if (!seg.isEmpty()) concise.add(seg);
+                        }
+                        label = String.join(", ", concise);
+                    }
+                    if (label.isBlank()) {
+                        label = safeStr(root.path("name").asText("")).trim();
+                    }
+                }
+                if (!label.isBlank()) {
+                    CachedAreaLabel computed = new CachedAreaLabel(label, subCity, city, now + CACHE_TTL_MS);
+                    reverseGeoCache.put(key, computed);
+                    return computed;
+                }
+            }
+        } catch (Exception ignored) {
+            // Fall back to local known location check if external reverse-geocode fails
+        }
+
+        // 2. Fallback to nearest registered KnownLocation only when external reverse-geocode is unavailable
         try {
             KnownLocation nearestKnown = null;
             double bestDistKm = Double.MAX_VALUE;
@@ -946,7 +1035,10 @@ public class CatalogService {
                 }
             }
             if (nearestKnown != null && bestDistKm <= 2.5) {
-                String label = joinNonBlank(nearestKnown.getName(), nearestKnown.getSubCity());
+                String prefixName = bestDistKm <= 0.15
+                        ? safeStr(nearestKnown.getName())
+                        : "Near " + safeStr(nearestKnown.getName());
+                String label = joinNonBlank(prefixName, nearestKnown.getSubCity());
                 CachedAreaLabel localMatch = new CachedAreaLabel(
                         label,
                         safeStr(nearestKnown.getSubCity()),
@@ -957,49 +1049,7 @@ public class CatalogService {
                 return localMatch;
             }
         } catch (Exception ignored) {
-            // Continue to external reverse-geocode lookup if local check fails
-        }
-        try {
-            String url = String.format(
-                    Locale.US,
-                    "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=%.6f&lon=%.6f&zoom=14&addressdetails=1",
-                    lat,
-                    lng
-            );
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMillis(2200))
-                    .header("User-Agent", "NearestYouEthiopia/1.0")
-                    .header("Accept-Language", "en")
-                    .GET()
-                    .build();
-            HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() >= 200 && res.statusCode() < 300) {
-                JsonNode root = objectMapper.readTree(res.body());
-                JsonNode addr = root.path("address");
-                String subCity = firstNonBlank(
-                        addr.path("city_district").asText(""),
-                        addr.path("suburb").asText(""),
-                        addr.path("neighbourhood").asText(""),
-                        addr.path("borough").asText(""),
-                        addr.path("road").asText("")
-                );
-                String city = firstNonBlank(
-                        addr.path("city").asText(""),
-                        addr.path("town").asText(""),
-                        addr.path("state").asText(""),
-                        addr.path("country").asText("")
-                );
-                String label = joinNonBlank(subCity, city);
-                if (label.isBlank()) {
-                    label = root.path("name").asText("");
-                }
-                CachedAreaLabel computed = new CachedAreaLabel(label, subCity, city, now + CACHE_TTL_MS);
-                reverseGeoCache.put(key, computed);
-                return computed;
-            }
-        } catch (Exception ignored) {
-            // Fall back smoothly without failing catalog loading
+            // Fall back smoothly to raw coordinates
         }
         return null;
     }

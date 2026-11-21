@@ -144,8 +144,55 @@ export const mapsApi = {
     return { data: { results: (response.data || []).map((item: any) => ({ placeId: String(item.place_id), displayName: item.display_name, subCity: item.address?.suburb || item.address?.city_district || '', lat: Number(item.lat), lng: Number(item.lon), source: 'NOMINATIM' })) } };
   },
   reverseGeocode: async (lat: number, lng: number) => {
-    const response = await geoApi.get('https://nominatim.openstreetmap.org/reverse', { params: { lat, lon: lng, format: 'jsonv2' } });
-    return { status: response.status, data: { formattedAddress: response.data?.display_name || '', placeId: response.data?.place_id ? String(response.data.place_id) : null } };
+    const response = await geoApi.get('https://nominatim.openstreetmap.org/reverse', {
+      params: { lat, lon: lng, format: 'jsonv2', zoom: 18, addressdetails: 1 },
+    });
+    const payload = response.data || {};
+    const addr = payload.address || {};
+    const houseNum = String(addr.house_number || '').trim();
+    const road = String(addr.road || addr.pedestrian || addr.residential || addr.footway || '').trim();
+    const roadWithNum = houseNum && road ? `${houseNum} ${road}` : road;
+    const spot = String(
+      addr.amenity || addr.building || addr.shop || addr.office || roadWithNum || addr.neighbourhood || ''
+    ).trim();
+    const subCity = String(
+      addr.suburb || addr.city_district || addr.borough || addr.quarter || addr.neighbourhood || ''
+    ).trim();
+    const city = String(
+      addr.city || addr.town || addr.village || addr.county || addr.state || addr.country || ''
+    ).trim();
+
+    const parts: string[] = [];
+    if (spot) parts.push(spot);
+    if (subCity && !parts.some((p) => p.toLowerCase() === subCity.toLowerCase())) {
+      parts.push(subCity);
+    }
+    if (city && !parts.some((p) => p.toLowerCase() === city.toLowerCase())) {
+      parts.push(city);
+    }
+    let exactLabel = parts.join(', ');
+    if (!exactLabel && typeof payload.display_name === 'string' && payload.display_name.trim()) {
+      exactLabel = payload.display_name
+        .split(',')
+        .slice(0, 3)
+        .map((s: string) => s.trim())
+        .filter(Boolean)
+        .join(', ');
+    }
+    if (!exactLabel && typeof payload.name === 'string' && payload.name.trim()) {
+      exactLabel = payload.name.trim();
+    }
+
+    return {
+      status: response.status,
+      data: {
+        formattedAddress: payload.display_name || exactLabel || '',
+        exactLabel,
+        subCity,
+        city,
+        placeId: payload.place_id ? String(payload.place_id) : null,
+      },
+    };
   },
   getRoute: async (fromLat: number, fromLng: number, toLat: number, toLng: number) => {
     const response = await geoApi.get(`https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}`, { params: { overview: 'full', geometries: 'geojson', steps: false } });

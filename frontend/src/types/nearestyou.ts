@@ -505,6 +505,7 @@ export interface DetectedLocation {
   city?: string;
   source: 'GPS' | 'IP_GEOLOCATION' | 'SAVED_PROFILE' | 'CITY_CENTER' | string;
   accuracyMode?: 'EXACT' | 'APPROXIMATE' | 'SAVED' | string;
+  accuracyMeters?: number;
 }
 
 export interface RecommendedListingItem {

@@ -29,10 +29,22 @@ api.interceptors.response.use(
       /timeout/i.test(String(error?.message || '')) ||
       (!error?.response && /network error/i.test(String(error?.message || '')));
 
+    const responseData = error?.response?.data;
+    const status = error?.response?.status;
     if (isTimeoutOrNetwork) {
       error.message = 'Connection error. Unable to reach the server right now. Please try again.';
+    } else if (typeof responseData === 'string' && /<(?:!doctype|html|head|body)\b/i.test(responseData)) {
+      error.message = status
+        ? `Backend service unavailable (HTTP ${status}).`
+        : 'Backend service unavailable.';
+    } else if (responseData && typeof responseData === 'object') {
+      const apiMsg = responseData.error || responseData.message;
+      if (typeof apiMsg === 'string' && apiMsg.trim()) {
+        error.message = apiMsg.trim();
+      }
     }
-    console.error('API Error:', error.response?.data || error.message);
+
+    console.warn('API response error:', status || 'NETWORK', error.message);
     return Promise.reject(error);
   }
 );
