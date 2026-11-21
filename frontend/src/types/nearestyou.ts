@@ -565,6 +565,7 @@ export interface ChatThreadSummary {
   otherPartyName: string | null;
   otherPartyLastSeenAt?: string | null;
   otherPartyActiveLastMinute?: boolean;
+  viewerIsOwner?: boolean;
   messageCount: number;
   lastMessage: ChatMessage;
 }
@@ -607,3 +608,18 @@ export interface ServiceContractRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface KnownLocationRecord {
+  id: number;
+  code: string;
+  name: string;
+  nameAm?: string | null;
+  city: string;
+  subCity: string;
+  category: string;
+  latitude: string | number;
+  longitude: string | number;
+  active: boolean;
+  createdAt?: string;
+}
+

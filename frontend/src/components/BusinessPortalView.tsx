@@ -2427,6 +2427,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                           title: `${b.bookingReference} · Live Chat`,
                           subtitle: b.customerName,
                           enableContracts: true,
+                          isOwner: true,
                         })
                       }
                       className="inline-flex min-h-[38px] items-center gap-1.5 rounded bg-[#176B52] px-3 py-1.5 font-semibold text-white hover:bg-[#125641]"
@@ -2509,6 +2510,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                                 title: `${b.bookingReference} · Live Chat`,
                                 subtitle: b.customerName,
                                 enableContracts: true,
+                                isOwner: true,
                               })
                             }
                             className="inline-flex items-center gap-1 rounded bg-[#176B52] px-2.5 py-1 font-semibold text-white hover:bg-[#125641]"

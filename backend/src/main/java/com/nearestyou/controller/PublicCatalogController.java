@@ -1,6 +1,7 @@
 package com.nearestyou.controller;
 
 import com.nearestyou.dto.NearestYouDtos.ImageSearchRequest;
+import com.nearestyou.entity.KnownLocation;
 import com.nearestyou.entity.UserAccount;
 import com.nearestyou.security.UserPrincipal;
 import com.nearestyou.service.CatalogService;
@@ -10,6 +11,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -36,6 +38,14 @@ public class PublicCatalogController {
     ) {
         UserAccount user = principal != null ? principal.account() : null;
         return catalogService.getPublicCatalog(request, user, lat, lng);
+    }
+
+    @GetMapping("/locations")
+    public List<KnownLocation> getKnownLocations(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String city
+    ) {
+        return catalogService.getKnownLocations(q, city);
     }
 
     @GetMapping("/location")

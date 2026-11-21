@@ -45,6 +45,7 @@ public class CatalogService {
     private final PlatformSettingRepository settingRepo;
     private final ProviderRegistrationRepository providerRepo;
     private final UserAccountRepository userRepo;
+    private final KnownLocationRepository knownLocationRepo;
     private final GeoDistanceService geoDistanceService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -68,6 +69,7 @@ public class CatalogService {
             PlatformSettingRepository settingRepo,
             ProviderRegistrationRepository providerRepo,
             UserAccountRepository userRepo,
+            KnownLocationRepository knownLocationRepo,
             GeoDistanceService geoDistanceService
     ) {
         this.categoryRepo = categoryRepo;
@@ -79,6 +81,7 @@ public class CatalogService {
         this.settingRepo = settingRepo;
         this.providerRepo = providerRepo;
         this.userRepo = userRepo;
+        this.knownLocationRepo = knownLocationRepo;
         this.geoDistanceService = geoDistanceService;
     }
 
@@ -240,8 +243,27 @@ public class CatalogService {
         result.put("liveProviders", liveProviders);
         result.put("reviews", recentReviews);
         result.put("settings", settings);
+        result.put("knownLocations", knownLocationRepo.findByActiveTrueOrderByCityAscSubCityAscNameAsc());
         result.put("deliveryMatchRadiusKm", deliveryMatchRadiusKm);
         return result;
+    }
+
+    @Transactional(readOnly = true)
+    public List<KnownLocation> getKnownLocations(String q, String city) {
+        List<KnownLocation> list = (city != null && !city.isBlank())
+                ? knownLocationRepo.findByCityIgnoreCaseAndActiveTrueOrderByNameAsc(city.trim())
+                : knownLocationRepo.findByActiveTrueOrderByCityAscSubCityAscNameAsc();
+        if (q == null || q.isBlank()) {
+            return list;
+        }
+        String needle = q.trim().toLowerCase(Locale.ROOT);
+        return list.stream()
+                .filter(kl -> (kl.getName() != null && kl.getName().toLowerCase(Locale.ROOT).contains(needle))
+                        || (kl.getNameAm() != null && kl.getNameAm().toLowerCase(Locale.ROOT).contains(needle))
+                        || (kl.getSubCity() != null && kl.getSubCity().toLowerCase(Locale.ROOT).contains(needle))
+                        || (kl.getCity() != null && kl.getCity().toLowerCase(Locale.ROOT).contains(needle))
+                        || (kl.getCode() != null && kl.getCode().toLowerCase(Locale.ROOT).contains(needle)))
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -910,6 +932,32 @@ public class CatalogService {
         }
         if (reverseGeoCache.size() > 500) {
             reverseGeoCache.clear();
+        }
+        try {
+            KnownLocation nearestKnown = null;
+            double bestDistKm = Double.MAX_VALUE;
+            for (KnownLocation kl : knownLocationRepo.findByActiveTrueOrderByCityAscSubCityAscNameAsc()) {
+                if (kl.getLatitude() == null || kl.getLongitude() == null) continue;
+                double d = geoDistanceService.calculateDistanceKm(
+                        lat, lng, kl.getLatitude().doubleValue(), kl.getLongitude().doubleValue());
+                if (d < bestDistKm) {
+                    bestDistKm = d;
+                    nearestKnown = kl;
+                }
+            }
+            if (nearestKnown != null && bestDistKm <= 2.5) {
+                String label = joinNonBlank(nearestKnown.getName(), nearestKnown.getSubCity());
+                CachedAreaLabel localMatch = new CachedAreaLabel(
+                        label,
+                        safeStr(nearestKnown.getSubCity()),
+                        safeStr(nearestKnown.getCity()),
+                        now + CACHE_TTL_MS
+                );
+                reverseGeoCache.put(key, localMatch);
+                return localMatch;
+            }
+        } catch (Exception ignored) {
+            // Continue to external reverse-geocode lookup if local check fails
         }
         try {
             String url = String.format(

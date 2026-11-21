@@ -289,6 +289,7 @@ public class EngagementService {
             item.put("otherPartyName", otherPartyName);
             item.put("otherPartyLastSeenAt", otherUser != null ? otherUser.getLastSeenAt() : null);
             item.put("otherPartyActiveLastMinute", otherUser != null && otherUser.isActiveLastMinute());
+            item.put("viewerIsOwner", viewerIsBusinessOwner);
             item.put("messageCount", msgs.size());
             item.put("lastMessage", last);
             threads.add(item);
@@ -638,16 +639,16 @@ public class EngagementService {
         String serviceGiverUid = biz.getOwnerUid();
         boolean callerIsServiceGiver = callerUid.equals(serviceGiverUid);
 
-        String clientUid;
         if (callerIsServiceGiver) {
-            clientUid = (req.recipientUid() != null && !req.recipientUid().isBlank())
-                    ? req.recipientUid().trim()
-                    : threadCustomerUid;
-            if (clientUid == null || clientUid.isBlank()) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "Client recipient is required when sending a contract offer.");
-            }
-        } else {
-            clientUid = callerUid;
+            throw new ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "Contract offers must be initialized by the client contacting the job seeker or service provider from their advertisement."
+            );
+        }
+
+        String clientUid = callerUid;
+        if (threadCustomerUid != null && !threadCustomerUid.isBlank() && !threadCustomerUid.equals(callerUid)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "Only the client in this conversation can initiate a contract offer.");
         }
 
         if (clientUid.equals(serviceGiverUid)) {

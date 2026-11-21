@@ -51,7 +51,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
   onEditAd,
 }) => {
   const t = TRANSLATIONS[language].activity;
-  const { firebaseUser, openAuthModal, authFetch } = useAuth();
+  const { dbUser, firebaseUser, openAuthModal, authFetch } = useAuth();
   const [tab, setTab] = useState<
     'ORDERS' | 'BOOKINGS' | 'DELIVERIES' | 'MESSAGES' | 'JOBS' | 'FAVORITES'
   >('ORDERS');
@@ -573,6 +573,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                               title: `${b.bookingReference} · ${t.liveChat}`,
                               subtitle: `${listing?.title || b.bookingType} · ${biz?.businessName || 'Provider'}`,
                               enableContracts: true,
+                              isOwner: false,
                             })
                           }
                           className="inline-flex items-center gap-1.5 rounded-lg bg-[#176B52] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#125641]"
@@ -858,6 +859,13 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                       </div>
                     );
                   }
+                  const selectedBiz = selected.businessId ? bizById[selected.businessId] : undefined;
+                  const myUids = new Set(
+                    [dbUser?.uid, dbUser?.firebaseUid, firebaseUser?.uid].filter(Boolean) as string[]
+                  );
+                  const isThreadOwner = Boolean(
+                    selected.viewerIsOwner || (selectedBiz && myUids.has(selectedBiz.ownerUid))
+                  );
                   return (
                     <>
                       <LiveChatPanel
@@ -887,6 +895,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                           bookingId={selected.bookingId}
                           recipientUid={selected.otherPartyUid}
                           defaultTitle={selected.listingTitle || selected.businessName}
+                          isOwner={isThreadOwner}
                           compact
                           refreshSignal={contractRefreshSignal}
                           onContractChanged={() => {

@@ -18,6 +18,8 @@ export const userApi = {
 export const catalogApi = {
   getCatalog: (params?: { lat?: number; lng?: number }) =>
     api.get('/api/v1/catalog', { params }),
+  getLocations: (params?: { q?: string; city?: string }) =>
+    api.get('/api/v1/catalog/locations', { params }),
   getLocation: (params?: { lat?: number; lng?: number }) =>
     api.get('/api/v1/catalog/location', { params }),
   getRecommendations: (params?: { lat?: number; lng?: number; limit?: number }) =>

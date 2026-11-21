@@ -91,7 +91,9 @@ export const ContractOfferSection: React.FC<ContractOfferSectionProps> = ({
   onContractChanged,
 }) => {
   const { dbUser, firebaseUser, openAuthModal } = useAuth();
-  const currentUid = dbUser?.uid || firebaseUser?.uid || null;
+  const myUids = new Set(
+    [dbUser?.uid, dbUser?.firebaseUid, firebaseUser?.uid].filter(Boolean) as string[]
+  );
 
   const [contracts, setContracts] = useState<ServiceContractRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -180,9 +182,14 @@ export const ContractOfferSection: React.FC<ContractOfferSectionProps> = ({
     loadContracts();
   }, [loadContracts, refreshSignal]);
 
-  const canCreateOffer = Boolean(
-    dbUser && (!isOwner || recipientUid || (threadKey && threadKey.startsWith('contact:')))
+  const contactClientUid =
+    threadKey && threadKey.startsWith('contact:') ? threadKey.split(':', 4)[3] || null : null;
+  const isThreadClientMismatch = Boolean(
+    contactClientUid && myUids.size > 0 && !myUids.has(contactClientUid)
   );
+  const effectiveIsOwner = Boolean(isOwner || isThreadClientMismatch);
+  const isTargetSpecified = Boolean(threadKey || businessId || listingId || bookingId);
+  const canCreateOffer = Boolean(dbUser && !effectiveIsOwner && isTargetSpecified);
 
   const handleCreateOffer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -332,7 +339,9 @@ export const ContractOfferSection: React.FC<ContractOfferSectionProps> = ({
             </h4>
           </div>
           <p className="text-[11px] text-[#172B3A]/60">
-            Propose formal terms, counter-offer, accept, and track delivery milestones
+            {effectiveIsOwner
+              ? 'Review contract offers sent by clients, counter-offer, accept, and track delivery milestones'
+              : 'Initialize a contract offer from this advertisement, counter-offer, accept, and track milestones'}
           </p>
         </div>
 
@@ -360,9 +369,9 @@ export const ContractOfferSection: React.FC<ContractOfferSectionProps> = ({
         </div>
       </div>
 
-      {isOwner && !canCreateOffer && (
+      {effectiveIsOwner && (
         <p className="text-[11px] text-[#172B3A]/65">
-          To propose a contract offer to a client, open any client inquiry in your Messages inbox or Bookings list.
+          Contract offers are initialized by clients contacting you from your advertisement. Once a client sends an offer, you can accept, counter-offer, or decline here.
         </p>
       )}
 
@@ -566,17 +575,21 @@ export const ContractOfferSection: React.FC<ContractOfferSectionProps> = ({
         <p className="py-2 text-xs text-[#172B3A]/55">Loading contract history...</p>
       ) : contracts.length === 0 ? (
         <p className="text-xs text-[#172B3A]/60">
-          No formal contract offers on this service yet. Propose one above to lock scope, schedule, and ETB terms.
+          {effectiveIsOwner
+            ? 'No contract offers from clients yet.'
+            : canCreateOffer
+              ? 'No formal contract offers on this advertisement yet. Click Propose Contract above to send an offer.'
+              : 'No contract offers yet. Open a job seeker or service provider advertisement and click Contact to send a contract offer.'}
         </p>
       ) : (
         <div className="space-y-2.5">
           {contracts.map((c) => {
             const isPendingTurn = c.status === 'OFFERED' || c.status === 'COUNTERED';
-            const isOfferor = Boolean(currentUid && c.offeredByUid === currentUid);
+            const isOfferor = Boolean(myUids.size > 0 && myUids.has(c.offeredByUid));
             const isCounterparty = Boolean(
-              currentUid &&
+              myUids.size > 0 &&
                 !isOfferor &&
-                (currentUid === c.clientUid || currentUid === c.serviceGiverUid)
+                (myUids.has(c.clientUid) || myUids.has(c.serviceGiverUid))
             );
             const busy = actingId === c.id;
             const counterFormOpen = counterOpenId === c.id;

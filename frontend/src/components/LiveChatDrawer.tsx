@@ -16,6 +16,7 @@ export interface ActiveChatTarget {
   initialLastSeenAt?: string | null;
   initialActiveLastMinute?: boolean;
   enableContracts?: boolean;
+  isOwner?: boolean;
 }
 
 interface LiveChatDrawerProps {
@@ -91,6 +92,7 @@ export const LiveChatDrawer: React.FC<LiveChatDrawerProps> = ({
                   listingId={target.listingId}
                   bookingId={target.bookingId}
                   recipientUid={target.recipientUid}
+                  isOwner={Boolean(target.isOwner)}
                   compact
                   refreshSignal={contractSignal}
                   onContractChanged={() => setContractSignal((n) => n + 1)}
