@@ -36,15 +36,15 @@ nearestyou:
     api-key: ${GEMINI_API_KEY:}
   payments:
     public-app-base-url: ${PUBLIC_APP_BASE_URL:http://localhost:3000}
+    public-api-base-url: ${PUBLIC_API_BASE_URL:http://localhost:8080}
     chapa:
       base-url: ${CHAPA_BASE_URL:https://api.chapa.co/v1}
       secret-key: ${CHAPA_SECRET_KEY:}
       webhook-secret: ${CHAPA_WEBHOOK_SECRET:}
     payo:
-      base-url: ${PAYO_BASE_URL:https://payment.et}
+      base-url: ${PAYO_BASE_URL:https://api.pygate.et/v1}
       api-key: ${PAYO_API_KEY:}
-      merchant-id: ${PAYO_MERCHANT_ID:}
-      webhook-secret: ${PAYO_WEBHOOK_SECRET:}
+    allow-sandbox-completion: ${PAYMENTS_ALLOW_SANDBOX_COMPLETION:false}
 
 springdoc:
   swagger-ui:

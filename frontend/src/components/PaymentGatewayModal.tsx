@@ -79,6 +79,14 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
     }
   }, [targets]);
 
+  useEffect(() => {
+    if (!gatewayConfig) return;
+    const chapaAvailable = gatewayConfig.gateways?.chapa?.enabled !== false;
+    const payoAvailable = gatewayConfig.gateways?.payo?.enabled !== false;
+    if (selectedGateway === 'CHAPA' && !chapaAvailable && payoAvailable) setSelectedGateway('PAYO');
+    else if (selectedGateway === 'PAYO' && !payoAvailable && chapaAvailable) setSelectedGateway('CHAPA');
+  }, [gatewayConfig, selectedGateway]);
+
   const initForCurrentTarget = useCallback(
     async (gw: 'CHAPA' | 'PAYO', idx: number, target: PaymentInitTarget) => {
       setInitializing(true);
@@ -118,6 +126,33 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
     }
   }, [activeIdx, selectedGateway, currentTarget, txMap, initForCurrentTarget]);
 
+  useEffect(() => {
+    if (!currentTx || currentTx.gateway !== 'PAYO' || currentTx.status !== 'AWAITING_RECEIPT') return;
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await paymentApi.verify(currentTx.txRef);
+        const refreshed: PaymentTransactionRecord = response.data;
+        setTxMap((prev) => ({ ...prev, [activeIdx]: refreshed }));
+        if (refreshed.status === 'PAID') {
+          const nextPaid = { ...paidIds, [activeIdx]: true };
+          setPaidIds(nextPaid);
+          onPaymentSettled(refreshed);
+          const nextUnpaidIdx = targets.findIndex((_, i) => i !== activeIdx && !nextPaid[i]);
+          if (nextUnpaidIdx >= 0) {
+            setActiveIdx(nextUnpaidIdx);
+            setSelectedGateway(targets[nextUnpaidIdx].gateway || 'CHAPA');
+          } else {
+            onNotify(`Payment verified by Payo (${refreshed.txRef}). Your booking is now confirmed.`);
+            onClose();
+          }
+        }
+      } catch {
+        // Temporary polling failures do not change the payment state.
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [currentTx?.txRef, currentTx?.gateway, currentTx?.status, activeIdx, paidIds, targets, onPaymentSettled, onNotify, onClose]);
+
   if (!currentTarget) return null;
 
   const handleCopy = (key: string, val?: string | null) => {
@@ -139,7 +174,7 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
       setPayoNotes('');
     } else {
       onNotify(
-        `Payment verified via ${settledTx.gateway} (${settledTx.txRef}). Provider sales settled & platform commission collected.`
+        `Payment verified via ${settledTx.gateway} (${settledTx.txRef}). The booking payment status has been updated.`
       );
       onClose();
     }
@@ -227,7 +262,7 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs text-emerald-300 font-semibold">
               <ShieldCheck className="h-4 w-4 shrink-0" />
-              Split Settlement Checkout · Chapa &amp; Payo
+              Secure Booking Payment · Chapa &amp; Payo
             </div>
             <h2 className="mt-0.5 truncate font-display text-lg font-bold">
               {currentTarget.title}
@@ -299,14 +334,14 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
               <div className="flex w-full items-center justify-between">
                 <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#172B3A]">
                   <CreditCard className="h-4 w-4 text-[#176B52]" />
-                  Chapa Split Pay
+                  Chapa Checkout
                 </span>
                 <span className="font-mono text-[10px] font-semibold text-[#176B52]">
                   {gatewayConfig?.gateways?.chapa?.mode || 'SANDBOX'}
                 </span>
               </div>
               <p className="mt-1 text-[11px] text-[#172B3A]/65">
-                Auto-splits subaccount net sales to provider &amp; commission to platform.
+Hosted payment page with server-side transaction verification.
               </p>
             </button>
 
@@ -323,26 +358,33 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
               <div className="flex w-full items-center justify-between">
                 <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#172B3A]">
                   <Wallet className="h-4 w-4 text-[#176B52]" />
-                  Payo Direct Transfer
+                  Payo Bank Transfer
                 </span>
                 <span className="font-mono text-[10px] font-semibold text-[#176B52]">
                   {gatewayConfig?.gateways?.payo?.mode || 'DIRECT'}
                 </span>
               </div>
               <p className="mt-1 text-[11px] text-[#172B3A]/65">
-                Settles sales directly to provider&apos;s own bank/Telebirr + commission leg.
+Customer pays by bank transfer; Payo verifies the receipt and notifies Nearest You.
               </p>
             </button>
           </div>
+          {!chapaEnabled && !payoEnabled && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+              Online payments are not configured yet. Add your Chapa test credentials or Payo project API key to the backend environment, then restart the service.
+            </div>
+          )}
 
           {initializing ? (
             <div className="flex items-center justify-center gap-2 rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/60 py-10 text-xs font-semibold text-[#172B3A]/70">
               <Loader2 className="h-4 w-4 animate-spin text-[#176B52]" />
-              Preparing split routing between Provider Account &amp; Platform Commission Account...
+              Preparing secure payment session...
             </div>
           ) : currentTx ? (
             <>
-              {/* Dual-Account Split Breakdown */}
+              {selectedGateway === 'CHAPA' && (
+                <>
+              {/* Chapa provider / platform account breakdown */}
               <div className="grid gap-3 sm:grid-cols-2">
                 {/* Leg 1: Service Provider's Own Account */}
                 <div className="rounded-xl border border-[#176B52]/25 bg-emerald-50/40 p-3.5 space-y-2">
@@ -478,13 +520,16 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
                 </div>
               </div>
 
+                </>
+              )}
+
               {/* CHAPA FLOW */}
               {selectedGateway === 'CHAPA' && (
                 <div className="rounded-xl border border-[#172B3A]/15 bg-white p-4 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#172B3A]/10 pb-2.5">
                     <div>
                       <h3 className="text-xs font-bold text-[#172B3A]">
-                        Chapa Split Checkout ({currentTx.gatewayMode})
+                        Chapa Hosted Checkout ({currentTx.gatewayMode})
                       </h3>
                       <p className="font-mono text-[11px] text-[#172B3A]/60">
                         Ref: {currentTx.txRef} · Total {formatEtb(Number(currentTx.grossAmount))}
@@ -525,31 +570,8 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <p className="text-xs text-[#172B3A]/75">
-                        Chapa Sandbox Split Checkout: choose your Ethiopian payment channel below to
-                        simulate Chapa split authorization ({formatEtb(Number(currentTx.providerAmount))}{' '}
-                        to provider subaccount, {formatEtb(Number(currentTx.commissionAmount))} to
-                        platform commission account).
-                      </p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { id: 'telebirr', label: 'Telebirr' },
-                          { id: 'cbebirr', label: 'CBE Birr / Bank' },
-                          { id: 'card', label: 'Ethiopian Card' },
-                        ].map((rail) => (
-                          <button
-                            key={rail.id}
-                            type="button"
-                            onClick={() => setChapaRail(rail.id as typeof chapaRail)}
-                            className={`min-h-[38px] rounded-lg border px-2 py-1.5 text-xs font-semibold ${
-                              chapaRail === rail.id
-                                ? 'border-[#176B52] bg-emerald-50 text-[#176B52]'
-                                : 'border-[#172B3A]/15 bg-[#F4F6F5]/50 text-[#172B3A]/75'
-                            }`}
-                          >
-                            {rail.label}
-                          </button>
-                        ))}
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                        Chapa test credentials are not configured on this backend. Add a Chapa TEST secret key to enable the real hosted sandbox checkout. Nearest You will not simulate or mark a payment as successful without provider verification.
                       </div>
                       <button
                         type="button"
@@ -569,121 +591,56 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
 
               {/* PAYO FLOW */}
               {selectedGateway === 'PAYO' && (
-                <form
-                  onSubmit={handleConfirmPayo}
-                  className="rounded-xl border border-[#172B3A]/15 bg-white p-4 space-y-3"
-                >
+                <div className="rounded-xl border border-[#172B3A]/15 bg-white p-4 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#172B3A]/10 pb-2.5">
                     <div>
-                      <h3 className="text-xs font-bold text-[#172B3A]">
-                        Payo Dual-Account Direct Settlement ({currentTx.gatewayMode})
-                      </h3>
+                      <h3 className="text-xs font-bold text-[#172B3A]">Payo Bank Transfer ({currentTx.gatewayMode})</h3>
                       <p className="font-mono text-[11px] text-[#172B3A]/60">
                         Ref: {currentTx.txRef} · Total {formatEtb(Number(currentTx.grossAmount))}
                       </p>
                     </div>
-                    {currentTx.gatewayCheckoutUrl && (
-                      <a
-                        href={currentTx.gatewayCheckoutUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 rounded-lg bg-[#172B3A] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#176B52]"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        Open Payo Hosted Link
-                      </a>
-                    )}
+                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${currentTx.status === 'PAID' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {currentTx.status === 'PAID' ? 'PAID' : currentTx.status === 'FAILED' ? 'EXPIRED' : 'AWAITING VERIFICATION'}
+                    </span>
                   </div>
-
-                  <div className="space-y-2 text-xs text-[#172B3A]/80">
-                    <label className="flex items-start gap-2 rounded-lg border border-[#172B3A]/10 bg-[#F4F6F5]/50 p-2.5">
-                      <input
-                        type="checkbox"
-                        checked={providerLegChecked}
-                        onChange={(e) => setProviderLegChecked(e.target.checked)}
-                        className="mt-0.5 accent-[#176B52]"
-                      />
-                      <span>
-                        <strong>Leg 1 (Provider Sales):</strong> Transfer{' '}
-                        <span className="font-mono font-bold">
-                          {formatEtb(Number(currentTx.providerAmount))}
-                        </span>{' '}
-                        directly to{' '}
-                        <span className="font-semibold">
-                          {providerAcc?.summaryLabel || 'Service Provider Account'}
-                        </span>
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2 rounded-lg border border-[#172B3A]/10 bg-[#F4F6F5]/50 p-2.5">
-                      <input
-                        type="checkbox"
-                        checked={commissionLegChecked}
-                        onChange={(e) => setCommissionLegChecked(e.target.checked)}
-                        className="mt-0.5 accent-[#176B52]"
-                      />
-                      <span>
-                        <strong>Leg 2 (Platform Commission):</strong> Transfer{' '}
-                        <span className="font-mono font-bold">
-                          {formatEtb(Number(currentTx.commissionAmount))}
-                        </span>{' '}
-                        to Single Platform Account ({commissionAcc?.bankName || 'CBE'} ·{' '}
-                        {commissionAcc?.accountNumber || '1000458921403'})
-                      </span>
-                    </label>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-[#172B3A]/75">
-                        Payo / Bank Receipt Reference *
-                      </label>
-                      <input
-                        required
-                        type="text"
-                        value={payoReceiptRef}
-                        onChange={(e) => setPayoReceiptRef(e.target.value)}
-                        placeholder="e.g., FT2411209876 or PAYO-88421"
-                        className="mt-1 h-10 w-full rounded-lg border border-[#172B3A]/15 px-3 font-mono text-xs focus:border-[#176B52] focus:outline-none"
-                      />
+                  <p className="text-xs leading-5 text-[#172B3A]/75">
+                    Payo securely displays the bank account, transfer reference and receipt-upload form. Complete the transfer on the Payo page. Nearest You will confirm this booking only after Payo approves the receipt and sends a valid signed webhook.
+                  </p>
+                  {currentTx.gatewayCheckoutUrl ? (
+                    <a href={currentTx.gatewayCheckoutUrl} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex w-full min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[#172B3A] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#176B52]">
+                      <ExternalLink className="h-4 w-4" /> Open secure Payo payment page
+                    </a>
+                  ) : (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                      Payo has not returned a hosted payment link. Check that PAYO_API_KEY and the Payo project are configured on the backend.
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-[#172B3A]/75">
-                        Upload Receipt Screenshot (Optional)
-                      </label>
-                      <label className="mt-1 flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#176B52]/40 bg-emerald-50/40 px-3 text-xs font-semibold text-[#176B52] hover:bg-emerald-50">
-                        <Upload className="h-3.5 w-3.5" />
-                        {payoReceiptImage ? 'Receipt Attached' : 'Attach Receipt Image'}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleUploadReceipt}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
+                  )}
+                  <div className="rounded-lg border border-[#176B52]/20 bg-emerald-50/50 p-3 text-xs text-[#172B3A]/80">
+                    <strong>Automatic confirmation is enabled.</strong> This window checks the payment status every five seconds. Do not submit a receipt reference here as proof of payment.
                   </div>
-
-                  <div>
-                    <input
-                      type="text"
-                      value={payoNotes}
-                      onChange={(e) => setPayoNotes(e.target.value)}
-                      placeholder="Optional transfer note (e.g., CBE Mobile + Telebirr ref)"
-                      className="h-9 w-full rounded-lg border border-[#172B3A]/15 px-3 text-xs focus:border-[#176B52] focus:outline-none"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={processing}
-                    className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 rounded-lg bg-[#176B52] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#125641] disabled:opacity-60"
-                  >
-                    {processing && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {processing
-                      ? 'Confirming Payo Settlement...'
-                      : `Confirm Payo Split Payment (${formatEtb(Number(currentTx.grossAmount))})`}
+                  <button type="button" onClick={async () => {
+                    setProcessing(true);
+                    try {
+                      const response = await paymentApi.verify(currentTx.txRef);
+                      const refreshed: PaymentTransactionRecord = response.data;
+                      setTxMap((prev) => ({ ...prev, [activeIdx]: refreshed }));
+                      if (refreshed.status === 'PAID') {
+                        const nextPaid = { ...paidIds, [activeIdx]: true };
+                        setPaidIds(nextPaid);
+                        handleAdvanceOrClose(refreshed, nextPaid);
+                      } else {
+                        setErrorMsg('Payo has not approved this payment yet. This page will continue checking automatically.');
+                      }
+                    } catch (err: any) {
+                      setErrorMsg(err?.response?.data?.error || 'Could not refresh Payo payment status.');
+                    } finally {
+                      setProcessing(false);
+                    }
+                  }} disabled={processing} className="w-full min-h-[42px] rounded-lg border border-[#176B52]/40 px-4 py-2 text-xs font-semibold text-[#176B52] disabled:opacity-60">
+                    {processing ? 'Checking payment…' : 'Check payment status now'}
                   </button>
-                </form>
+                </div>
               )}
             </>
           ) : null}

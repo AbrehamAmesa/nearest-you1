@@ -73,14 +73,22 @@ public class PaymentController {
             @RequestHeader(value = "Chapa-Signature", required = false) String chapaSig,
             @RequestHeader(value = "x-chapa-signature", required = false) String xChapaSig
     ) {
-        String sig = chapaSig != null && !chapaSig.isBlank() ? chapaSig : xChapaSig;
+        String sig = xChapaSig != null && !xChapaSig.isBlank() ? xChapaSig : chapaSig;
         return paymentGatewayService.handleChapaWebhook(rawBody, sig);
+    }
+
+    @GetMapping("/chapa/callback")
+    public Map<String, Object> chapaCallback(
+            @RequestParam(value = "trx_ref", required = false) String trxRef,
+            @RequestParam(value = "tx_ref", required = false) String txRef
+    ) {
+        return paymentGatewayService.handleChapaCallback(trxRef != null ? trxRef : txRef);
     }
 
     @PostMapping("/payo/webhook")
     public Map<String, Object> payoWebhook(
             @RequestBody(required = false) String rawBody,
-            @RequestHeader(value = "x-payo-signature", required = false) String payoSig
+            @RequestHeader(value = "x-pygate-signature", required = false) String payoSig
     ) {
         return paymentGatewayService.handlePayoWebhook(rawBody, payoSig);
     }

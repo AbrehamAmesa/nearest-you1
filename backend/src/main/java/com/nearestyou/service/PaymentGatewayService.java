@@ -80,6 +80,9 @@ public class PaymentGatewayService {
     @Value("${nearestyou.payments.public-app-base-url:http://localhost:3000}")
     private String publicAppBaseUrl;
 
+    @Value("${nearestyou.payments.public-api-base-url:http://localhost:8080}")
+    private String publicApiBaseUrl;
+
     @Value("${nearestyou.payments.chapa.base-url:https://api.chapa.co/v1}")
     private String chapaBaseUrl;
 
@@ -89,17 +92,14 @@ public class PaymentGatewayService {
     @Value("${nearestyou.payments.chapa.webhook-secret:}")
     private String chapaWebhookSecret;
 
-    @Value("${nearestyou.payments.payo.base-url:https://payment.et}")
+    @Value("${nearestyou.payments.payo.base-url:https://api.pygate.et/v1}")
     private String payoBaseUrl;
 
     @Value("${nearestyou.payments.payo.api-key:}")
     private String payoApiKey;
 
-    @Value("${nearestyou.payments.payo.merchant-id:}")
-    private String payoMerchantId;
-
-    @Value("${nearestyou.payments.payo.webhook-secret:}")
-    private String payoWebhookSecret;
+    @Value("${nearestyou.payments.allow-sandbox-completion:false}")
+    private boolean allowSandboxCompletion;
 
     public PaymentGatewayService(
             PaymentTransactionRepository paymentRepo,
@@ -147,15 +147,19 @@ public class PaymentGatewayService {
 
     private String cleanPayoUrl(String path) {
         String base = (payoBaseUrl == null || payoBaseUrl.isBlank())
-                ? "https://payment.et"
+                ? "https://api.pygate.et/v1"
                 : payoBaseUrl.replaceAll("/+$", "");
+        if (!base.endsWith("/v1")) base = base + "/v1";
         return base + path;
     }
 
     private String cleanPublicBaseUrl(String overrideUrl) {
-        String base = (overrideUrl != null && !overrideUrl.isBlank())
-                ? overrideUrl.trim()
-                : ((publicAppBaseUrl != null && !publicAppBaseUrl.isBlank()) ? publicAppBaseUrl.trim() : "http://localhost:3000");
+        String base = (publicAppBaseUrl != null && !publicAppBaseUrl.isBlank()) ? publicAppBaseUrl.trim() : "http://localhost:3000";
+        return base.replaceAll("/+$", "");
+    }
+
+    private String cleanPublicApiBaseUrl() {
+        String base = (publicApiBaseUrl != null && !publicApiBaseUrl.isBlank()) ? publicApiBaseUrl.trim() : "http://localhost:8080";
         return base.replaceAll("/+$", "");
     }
 
@@ -235,12 +239,14 @@ public class PaymentGatewayService {
         out.put("banks", getEthiopianBanks());
         out.put("gateways", Map.of(
                 "chapa", Map.of(
-                        "enabled", chapaEnabled,
-                        "mode", isChapaLiveConfigured() ? "LIVE" : "SANDBOX"
+                        "enabled", chapaEnabled && (isChapaLiveConfigured() || allowSandboxCompletion),
+                        "configured", isChapaLiveConfigured(),
+                        "mode", isChapaLiveConfigured() ? "LIVE" : (allowSandboxCompletion ? "SANDBOX" : "NOT_CONFIGURED")
                 ),
                 "payo", Map.of(
-                        "enabled", payoEnabled,
-                        "mode", isPayoLiveConfigured() ? "LIVE" : "SANDBOX"
+                        "enabled", payoEnabled && isPayoLiveConfigured(),
+                        "configured", isPayoLiveConfigured(),
+                        "mode", isPayoLiveConfigured() ? "LIVE" : "NOT_CONFIGURED"
                 )
         ));
         return out;
@@ -380,6 +386,12 @@ public class PaymentGatewayService {
         if ("PAYO".equals(gateway) && !payoEnabled) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Payo checkout is currently disabled by Platform Admin.");
         }
+        if ("CHAPA".equals(gateway) && !isChapaLiveConfigured() && !allowSandboxCompletion) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Chapa is not configured. Add a Chapa TEST or LIVE secret key to the backend environment.");
+        }
+        if ("PAYO".equals(gateway) && !isPayoLiveConfigured()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Payo is not configured. Add your Payo project API key to the backend environment.");
+        }
 
         String referenceCode;
         String customerUid;
@@ -455,6 +467,9 @@ public class PaymentGatewayService {
             if ("SUCCESSFUL".equalsIgnoreCase(booking.getPaymentStatus())) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "This booking is already paid.");
             }
+            if ("CANCELLED".equalsIgnoreCase(booking.getBookingStatus())) {
+                throw new ApiException(HttpStatus.CONFLICT, "A cancelled booking cannot be paid.");
+            }
             Business biz = businessRepo.findById(booking.getBusinessId())
                     .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Service provider business not found."));
 
@@ -463,6 +478,9 @@ public class PaymentGatewayService {
             customerName = booking.getCustomerName();
             providerUid = biz.getOwnerUid();
             businessId = biz.getId();
+            if (!booking.isQuoteApproved()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "The provider must approve the booking quote before payment can be collected.");
+            }
             grossAmount = booking.getAgreedPrice();
 
             CommissionRecord cr = commissionRepo.findByTransactionRef(referenceCode).orElse(null);
@@ -519,6 +537,24 @@ public class PaymentGatewayService {
             }
         }
 
+        List<PaymentTransaction> priorTransactions = paymentRepo.findByTransactionTypeAndReferenceIdOrderByCreatedAtDesc(txType, req.referenceId());
+        for (PaymentTransaction prior : priorTransactions) {
+            if ("PAID".equalsIgnoreCase(prior.getStatus())) {
+                throw new ApiException(HttpStatus.CONFLICT, "This reference has already been paid.");
+            }
+            boolean active = "INITIALIZED".equalsIgnoreCase(prior.getStatus()) || "AWAITING_RECEIPT".equalsIgnoreCase(prior.getStatus());
+            if (active && "PAYO".equalsIgnoreCase(prior.getGateway())
+                    && prior.getCreatedAt() != null && prior.getCreatedAt().isBefore(Instant.now().minus(Duration.ofMinutes(10)))) {
+                prior.setStatus("FAILED");
+                paymentRepo.save(prior);
+                active = false;
+            }
+            if (active) {
+                if (gateway.equalsIgnoreCase(prior.getGateway())) return prior;
+                throw new ApiException(HttpStatus.CONFLICT, "A payment is already pending through " + prior.getGateway() + ". Complete it or wait for it to expire before switching gateways.");
+            }
+        }
+
         String txRef = "NY-" + gateway + "-" + UUID.randomUUID().toString().substring(0, 10).toUpperCase(Locale.ROOT);
         String email = (req.customerEmail() != null && !req.customerEmail().isBlank())
                 ? req.customerEmail().trim()
@@ -527,7 +563,8 @@ public class PaymentGatewayService {
         String returnWithRef = baseReturn + (baseReturn.contains("?") ? "&" : "?")
                 + "paymentTxRef=" + URLEncoder.encode(txRef, StandardCharsets.UTF_8)
                 + "&gateway=" + gateway;
-        String callbackUrl = cleanPublicBaseUrl(null) + "/api/v1/payments/" + gateway.toLowerCase(Locale.ROOT) + "/webhook";
+        String callbackUrl = cleanPublicApiBaseUrl() + "/api/v1/payments/" + gateway.toLowerCase(Locale.ROOT)
+                + ("CHAPA".equals(gateway) ? "/callback" : "/webhook");
 
         PaymentTransaction tx = new PaymentTransaction();
         tx.setTxRef(txRef);
@@ -570,22 +607,15 @@ public class PaymentGatewayService {
                 ));
             }
         } else {
-            if (isPayoLiveConfigured()) {
-                Map<String, Object> initRes = callPayoInitialize(tx, email, req.phoneNumber(), callbackUrl, returnWithRef);
-                tx.setGatewayMode("LIVE");
-                tx.setGatewayCheckoutUrl(stringVal(initRes.get("checkoutUrl")));
-                tx.setGatewayTransactionId(stringVal(initRes.get("orderId")));
-                tx.setGatewayRawResponse(initRes);
-                tx.setStatus("AWAITING_RECEIPT");
-            } else {
-                tx.setGatewayMode("SANDBOX");
-                tx.setGatewayCheckoutUrl(null);
-                tx.setStatus("AWAITING_RECEIPT");
-                tx.setGatewayRawResponse(Map.of(
-                        "mode", "SANDBOX",
-                        "message", "Payo dual-leg direct settlement initialized. Transfer Provider Sales leg to the provider's own account and Platform Commission leg to the single Platform Commission Account, then submit receipt confirmation."
-                ));
+            if (!isPayoLiveConfigured()) {
+                throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Payo API key is not configured.");
             }
+            Map<String, Object> initRes = callPayoInitialize(tx, callbackUrl);
+            tx.setGatewayMode("LIVE");
+            tx.setGatewayCheckoutUrl(stringVal(initRes.get("checkoutUrl")));
+            tx.setGatewayTransactionId(stringVal(initRes.get("orderId")));
+            tx.setGatewayRawResponse(initRes);
+            tx.setStatus("AWAITING_RECEIPT");
         }
 
         PaymentTransaction saved = paymentRepo.save(tx);
@@ -610,33 +640,26 @@ public class PaymentGatewayService {
             if ("LIVE".equalsIgnoreCase(tx.getGatewayMode()) && isChapaLiveConfigured()) {
                 Map<String, Object> verifyRes = callChapaVerify(tx.getTxRef());
                 tx.setGatewayRawResponse(verifyRes);
-                String dataStatus = stringVal(verifyRes.get("status"));
-                if (!"success".equalsIgnoreCase(dataStatus)) {
-                    throw new ApiException(HttpStatus.BAD_REQUEST,
-                            "Chapa payment status is currently '" + (dataStatus != null ? dataStatus : "pending") + "'. Complete checkout first.");
-                }
-                String chapaRefId = stringVal(verifyRes.get("reference"));
+                validateChapaVerification(tx, verifyRes);
+                String chapaRefId = firstNonBlank(stringVal(verifyRes.get("reference")), stringVal(verifyRes.get("id")));
                 if (chapaRefId != null) tx.setGatewayTransactionId(chapaRefId);
-            } else {
+                return markTransactionPaid(tx, principal.uid(), "CHAPA_VERIFIED");
+            }
+            if (allowSandboxCompletion && "SANDBOX".equalsIgnoreCase(tx.getGatewayMode())) {
                 tx.setGatewayTransactionId("CHAPA-SBX-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT));
+                return markTransactionPaid(tx, principal.uid(), "CHAPA_SANDBOX_VERIFIED");
             }
-            return markTransactionPaid(tx, principal.uid(), "CHAPA_VERIFIED");
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Chapa is in sandbox mode. Configure a Chapa test secret key to complete a real sandbox checkout.");
         } else {
-            if ("LIVE".equalsIgnoreCase(tx.getGatewayMode()) && isPayoLiveConfigured()) {
-                Map<String, Object> payoStatus = callPayoVerify(tx.getTxRef(), tx.getGatewayTransactionId());
-                if (payoStatus != null) {
-                    tx.setGatewayRawResponse(payoStatus);
-                    String st = stringVal(payoStatus.get("status"));
-                    if ("paid".equalsIgnoreCase(st) || "success".equalsIgnoreCase(st) || "completed".equalsIgnoreCase(st)) {
-                        return markTransactionPaid(tx, principal.uid(), "PAYO_VERIFIED");
-                    }
-                }
+            // Payo's hosted order expires after 10 minutes. The signed payment.approved webhook
+            // remains the only event that can move this transaction to PAID.
+            if ("AWAITING_RECEIPT".equalsIgnoreCase(tx.getStatus()) && tx.getCreatedAt() != null
+                    && tx.getCreatedAt().isBefore(Instant.now().minus(Duration.ofMinutes(10)))) {
+                tx.setStatus("FAILED");
+                return paymentRepo.save(tx);
             }
-            if (tx.getPayerReceiptReference() == null || tx.getPayerReceiptReference().isBlank()) {
-                throw new ApiException(HttpStatus.BAD_REQUEST,
-                        "Payo verification requires your transfer receipt reference or confirmation first.");
-            }
-            return markTransactionPaid(tx, principal.uid(), "PAYO_VERIFIED");
+            return tx;
         }
     }
 
@@ -661,8 +684,7 @@ public class PaymentGatewayService {
         if (req.receiptImageUrl() != null && !req.receiptImageUrl().isBlank()) {
             tx.setPayerReceiptImageUrl(req.receiptImageUrl().trim());
         }
-        tx.setGatewayTransactionId("PAYO-" + receiptRef);
-
+        // Preserve the provider's Payo orderId: the signed webhook uses it to locate this transaction.
         Map<String, Object> confirmationMeta = new LinkedHashMap<>();
         if (tx.getGatewayRawResponse() != null) {
             confirmationMeta.putAll(tx.getGatewayRawResponse());
@@ -675,15 +697,26 @@ public class PaymentGatewayService {
         }
         tx.setGatewayRawResponse(confirmationMeta);
 
-        return markTransactionPaid(tx, principal.uid(), "PAYO_RECEIPT_CONFIRMED");
+        tx.setStatus("AWAITING_RECEIPT");
+        PaymentTransaction saved = paymentRepo.save(tx);
+        AuditLog audit = new AuditLog();
+        audit.setActorUid(principal.uid());
+        audit.setActorEmail(principal.email());
+        audit.setAction("PAYO_RECEIPT_SUBMITTED");
+        audit.setEntityType("payment_transaction");
+        audit.setEntityId(saved.getTxRef());
+        audit.setDetails(Map.of("referenceCode", saved.getReferenceCode(), "message", "Receipt submitted; awaiting Payo verification."));
+        auditLogRepo.save(audit);
+        return saved;
     }
 
     @Transactional
     public Map<String, Object> handleChapaWebhook(String rawBody, String signatureHeader) {
-        if (chapaWebhookSecret != null && !chapaWebhookSecret.isBlank()) {
-            if (!verifyHmacSha256(rawBody, signatureHeader, chapaWebhookSecret.trim())) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid Chapa webhook signature.");
-            }
+        if (chapaWebhookSecret == null || chapaWebhookSecret.isBlank()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Chapa webhook secret is not configured.");
+        }
+        if (!verifyChapaWebhookSignature(rawBody, signatureHeader, chapaWebhookSecret.trim())) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid Chapa webhook signature.");
         }
         try {
             JsonNode root = objectMapper.readTree(rawBody == null || rawBody.isBlank() ? "{}" : rawBody);
@@ -704,6 +737,12 @@ public class PaymentGatewayService {
                 return Map.of("received", true, "ignored", "Unknown tx_ref");
             }
             if ("success".equalsIgnoreCase(status) || "charge.success".equalsIgnoreCase(status)) {
+                if (!isChapaLiveConfigured()) {
+                    throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Chapa secret key is not configured for server-side verification.");
+                }
+                Map<String, Object> verified = callChapaVerify(tx.getTxRef());
+                validateChapaVerification(tx, verified);
+                tx.setGatewayRawResponse(verified);
                 markTransactionPaid(tx, "WEBHOOK:CHAPA", "CHAPA_WEBHOOK");
             }
             return Map.of("received", true, "txRef", txRef, "status", tx.getStatus());
@@ -715,44 +754,47 @@ public class PaymentGatewayService {
     }
 
     @Transactional
+    public Map<String, Object> handleChapaCallback(String txRef) {
+        if (txRef == null || txRef.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "Missing Chapa transaction reference.");
+        PaymentTransaction tx = paymentRepo.findByTxRefIgnoreCase(txRef.trim())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Payment transaction not found."));
+        if (!"CHAPA".equalsIgnoreCase(tx.getGateway())) throw new ApiException(HttpStatus.BAD_REQUEST, "Transaction is not a Chapa payment.");
+        if ("PAID".equalsIgnoreCase(tx.getStatus())) return Map.of("received", true, "status", "PAID", "txRef", tx.getTxRef());
+        if (!isChapaLiveConfigured()) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Chapa server verification is not configured.");
+        Map<String, Object> verified = callChapaVerify(tx.getTxRef());
+        validateChapaVerification(tx, verified);
+        tx.setGatewayRawResponse(verified);
+        markTransactionPaid(tx, "CALLBACK:CHAPA", "CHAPA_CALLBACK_VERIFIED");
+        return Map.of("received", true, "status", "PAID", "txRef", tx.getTxRef());
+    }
+
+    @Transactional
     public Map<String, Object> handlePayoWebhook(String rawBody, String signatureHeader) {
-        if (payoWebhookSecret != null && !payoWebhookSecret.isBlank()) {
-            if (!verifyHmacSha256(rawBody, signatureHeader, payoWebhookSecret.trim())) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid Payo webhook signature.");
-            }
+        String signingSecret = payoApiKey;
+        if (signingSecret == null || signingSecret.isBlank()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Payo webhook signing key is not configured.");
+        }
+        if (!verifyHmacSha256(rawBody, signatureHeader, signingSecret)) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid Payo webhook signature.");
         }
         try {
             JsonNode root = objectMapper.readTree(rawBody == null || rawBody.isBlank() ? "{}" : rawBody);
-            String txRef = firstNonBlank(
-                    root.path("tx_ref").asText(null),
-                    root.path("txRef").asText(null),
-                    root.path("reference").asText(null),
-                    root.path("orderReference").asText(null),
-                    root.path("data").path("reference").asText(null)
-            );
-            String status = firstNonBlank(
-                    root.path("status").asText(null),
-                    root.path("data").path("status").asText(null),
-                    root.path("event").asText(null)
-            );
-            if (txRef == null || txRef.isBlank()) {
-                return Map.of("received", true, "ignored", "Missing reference");
-            }
-            PaymentTransaction tx = paymentRepo.findByTxRefIgnoreCase(txRef).orElse(null);
-            if (tx == null) {
-                return Map.of("received", true, "ignored", "Unknown tx_ref");
-            }
-            if ("paid".equalsIgnoreCase(status) || "success".equalsIgnoreCase(status)
-                    || "completed".equalsIgnoreCase(status) || "verified".equalsIgnoreCase(status)) {
-                String receiptId = firstNonBlank(
-                        root.path("receiptReference").asText(null),
-                        root.path("transactionId").asText(null),
-                        root.path("data").path("transactionId").asText(null)
-                );
-                if (receiptId != null) tx.setPayerReceiptReference(receiptId);
+            String orderId = firstNonBlank(root.path("orderId").asText(null), root.path("data").path("orderId").asText(null));
+            String status = firstNonBlank(root.path("status").asText(null), root.path("data").path("status").asText(null));
+            if (orderId == null) return Map.of("received", true, "ignored", "Missing orderId");
+            PaymentTransaction tx = paymentRepo.findByGatewayTransactionId(orderId).orElse(null);
+            if (tx == null) return Map.of("received", true, "ignored", "Unknown orderId");
+            if ("APPROVED".equalsIgnoreCase(status) || "payment.approved".equalsIgnoreCase(root.path("event").asText(null))) {
+                BigDecimal receivedAmount = decimalValue(firstNonBlank(
+                        root.path("amount").asText(null), root.path("data").path("amount").asText(null)));
+                String receivedCurrency = firstNonBlank(root.path("currency").asText(null), root.path("data").path("currency").asText(null));
+                if (receivedAmount == null || receivedAmount.compareTo(tx.getGrossAmount()) != 0
+                        || !"ETB".equalsIgnoreCase(receivedCurrency)) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST, "Payo webhook amount or currency does not match the payment.");
+                }
                 markTransactionPaid(tx, "WEBHOOK:PAYO", "PAYO_WEBHOOK");
             }
-            return Map.of("received", true, "txRef", txRef, "status", tx.getStatus());
+            return Map.of("received", true, "txRef", tx.getTxRef(), "status", tx.getStatus());
         } catch (ApiException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -796,8 +838,13 @@ public class PaymentGatewayService {
 
         tx.setStatus("PAID");
         tx.setPaidAt(Instant.now());
-        tx.setCommissionLegStatus("COLLECTED_IN_PLATFORM_ACCOUNT");
-        tx.setProviderLegStatus(isDispatch ? "HELD_ESCROW" : "SETTLED_TO_PROVIDER_ACCOUNT");
+        tx.setCommissionLegStatus("PAYO".equalsIgnoreCase(tx.getGateway())
+                ? "GROSS_AMOUNT_COLLECTED_BY_PLATFORM" : "COLLECTED_IN_PLATFORM_ACCOUNT");
+        boolean chapaSubaccountSettlement = "CHAPA".equalsIgnoreCase(tx.getGateway())
+                && tx.getChapaSubaccountId() != null && !tx.getChapaSubaccountId().isBlank()
+                && !tx.getChapaSubaccountId().endsWith("-SANDBOX");
+        tx.setProviderLegStatus(isDispatch ? "HELD_ESCROW"
+                : (chapaSubaccountSettlement ? "SETTLED_TO_PROVIDER_ACCOUNT" : "PENDING_PROVIDER_PAYOUT"));
         PaymentTransaction saved = paymentRepo.save(tx);
 
         if ("ORDER".equalsIgnoreCase(tx.getTransactionType())) {
@@ -813,7 +860,8 @@ public class PaymentGatewayService {
             bookingRepo.findById(tx.getReferenceId()).ifPresent(booking -> {
                 booking.setPaymentMethod(tx.getGateway());
                 booking.setPaymentStatus("SUCCESSFUL");
-                if ("PENDING".equalsIgnoreCase(booking.getBookingStatus()) && booking.isQuoteApproved()) {
+                if (("PENDING".equalsIgnoreCase(booking.getBookingStatus())
+                        || "PENDING_PAYMENT".equalsIgnoreCase(booking.getBookingStatus())) && booking.isQuoteApproved()) {
                     booking.setBookingStatus("CONFIRMED");
                 }
                 Booking savedBooking = bookingRepo.save(booking);
@@ -868,7 +916,7 @@ public class PaymentGatewayService {
             cr.setCommissionSettlementStatus(tx.getCommissionLegStatus());
             cr.setProviderSettlementStatus(tx.getProviderLegStatus());
             if ("PAID".equalsIgnoreCase(tx.getStatus())) {
-                cr.setStatus("SETTLED");
+                cr.setStatus("PAYO".equalsIgnoreCase(tx.getGateway()) ? "COLLECTED_PENDING_PROVIDER_PAYOUT" : "SETTLED");
             }
             commissionRepo.save(cr);
         });
@@ -907,7 +955,7 @@ public class PaymentGatewayService {
             sub.put("id", tx.getChapaSubaccountId());
             sub.put("split_type", "flat");
             sub.put("split_value", tx.getCommissionAmount());
-            payload.put("subaccounts", List.of(sub));
+            payload.put("subaccounts", sub);
         }
 
         try {
@@ -948,8 +996,9 @@ public class PaymentGatewayService {
             Map<String, Object> body = objectMapper.readValue(resp.body(), new TypeReference<>() {});
             Map<String, Object> flat = new LinkedHashMap<>(body);
             if (body.get("data") instanceof Map<?, ?> dataMap) {
-                if (dataMap.get("status") != null) flat.put("status", String.valueOf(dataMap.get("status")));
-                if (dataMap.get("reference") != null) flat.put("reference", String.valueOf(dataMap.get("reference")));
+                for (String key : List.of("status", "reference", "id", "amount", "currency", "tx_ref", "trx_ref", "payment_status")) {
+                    if (dataMap.get(key) != null) flat.put(key, dataMap.get(key));
+                }
             }
             return flat;
         } catch (Exception ex) {
@@ -957,69 +1006,44 @@ public class PaymentGatewayService {
         }
     }
 
-    private Map<String, Object> callPayoInitialize(
-            PaymentTransaction tx,
-            String email,
-            String phoneNumber,
-            String callbackUrl,
-            String returnUrl
-    ) {
+    private Map<String, Object> callPayoInitialize(PaymentTransaction tx, String callbackUrl) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("amount", tx.getGrossAmount());
-        payload.put("currency", "ETB");
-        payload.put("reference", tx.getTxRef());
-        payload.put("customerEmail", email);
-        if (phoneNumber != null && !phoneNumber.isBlank()) {
-            payload.put("customerPhone", phoneNumber.trim());
-        }
-        if (payoMerchantId != null && !payoMerchantId.isBlank()) {
-            payload.put("merchantId", payoMerchantId.trim());
-        }
+        payload.put("description", "Nearest You booking/order " + tx.getReferenceCode());
         payload.put("callbackUrl", callbackUrl);
-        payload.put("returnUrl", returnUrl);
-        payload.put("splitAccounts", Map.of(
-                "commissionAccount", tx.getPlatformCommissionAccountSnapshot(),
-                "commissionAmount", tx.getCommissionAmount(),
-                "providerAccount", tx.getProviderPayoutAccountSnapshot(),
-                "providerAmount", tx.getProviderAmount()
-        ));
-
         try {
             String json = objectMapper.writeValueAsString(payload);
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(cleanPayoUrl("/api/orders")))
-                    .timeout(Duration.ofSeconds(10))
-                    .header("Authorization", "Bearer " + payoApiKey.trim())
+                    .uri(URI.create(cleanPayoUrl("/orders")))
+                    .timeout(Duration.ofSeconds(12))
+                    .header("x-api-key", payoApiKey.trim())
+                    .header("Idempotency-Key", tx.getTxRef())
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json))
                     .build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                return objectMapper.readValue(resp.body(), new TypeReference<>() {});
+            if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "Payo order creation failed (HTTP " + resp.statusCode() + ").");
             }
-            log.warn("Payo remote /api/orders returned HTTP {}; falling back to Payo dual-leg direct transfer.", resp.statusCode());
-            return Map.of("mode", "DIRECT_SPLIT", "httpStatus", resp.statusCode());
+            JsonNode root = objectMapper.readTree(resp.body());
+            JsonNode data = root.has("data") ? root.path("data") : root;
+            String orderId = firstNonBlank(data.path("orderId").asText(null), data.path("order_id").asText(null), data.path("id").asText(null));
+            String paymentUrl = firstNonBlank(data.path("paymentUrl").asText(null), data.path("checkoutUrl").asText(null),
+                    data.path("payment_url").asText(null), data.path("checkout_url").asText(null),
+                    data.path("paymentLink").asText(null), data.path("url").asText(null));
+            if (orderId == null || paymentUrl == null) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "Payo response did not include orderId and payment URL.");
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("orderId", orderId);
+            result.put("checkoutUrl", paymentUrl);
+            result.put("raw", objectMapper.convertValue(root, new TypeReference<Map<String, Object>>() {}));
+            return result;
+        } catch (ApiException ex) {
+            throw ex;
         } catch (Exception ex) {
-            log.warn("Payo remote call unavailable ({}); using Payo dual-leg direct transfer.", ex.getMessage());
-            return Map.of("mode", "DIRECT_SPLIT", "error", ex.getMessage());
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "Unable to create Payo payment order: " + ex.getMessage());
         }
-    }
-
-    private Map<String, Object> callPayoVerify(String txRef, String orderId) {
-        String idToCheck = (orderId != null && !orderId.isBlank()) ? orderId : txRef;
-        try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(cleanPayoUrl("/api/orders/" + URLEncoder.encode(idToCheck, StandardCharsets.UTF_8))))
-                    .timeout(Duration.ofSeconds(8))
-                    .header("Authorization", "Bearer " + payoApiKey.trim())
-                    .GET()
-                    .build();
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
-                return objectMapper.readValue(resp.body(), new TypeReference<>() {});
-            }
-        } catch (Exception ignored) {}
-        return null;
     }
 
     private String provisionChapaSubaccountIfPossible(
@@ -1060,7 +1084,9 @@ public class PaymentGatewayService {
             if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
                 JsonNode root = objectMapper.readTree(resp.body());
                 JsonNode data = root.path("data");
-                String id = firstNonBlank(data.path("subaccount_id").asText(null), data.path("id").asText(null));
+                String id = firstNonBlank(data.path("subaccount_id").asText(null), data.path("id").asText(null),
+                        data.path("subaccounts").path("id").asText(null),
+                        data.path("subaccounts").path("subaccount_id").asText(null));
                 if (id != null && !id.isBlank()) {
                     return id;
                 }
@@ -1179,6 +1205,33 @@ public class PaymentGatewayService {
         return Set.of("CHAPA", "PAYO", "BOTH").contains(upper) ? upper : "BOTH";
     }
 
+    private void validateChapaVerification(PaymentTransaction tx, Map<String, Object> verifyRes) {
+        String status = firstNonBlank(stringVal(verifyRes.get("status")), stringVal(verifyRes.get("payment_status")));
+        String txRef = firstNonBlank(stringVal(verifyRes.get("tx_ref")), stringVal(verifyRes.get("txRef")));
+        String currency = stringVal(verifyRes.get("currency"));
+        BigDecimal amount = decimalValue(stringVal(verifyRes.get("amount")));
+        if (!"success".equalsIgnoreCase(status)
+                || txRef == null || !txRef.equalsIgnoreCase(tx.getTxRef())
+                || currency == null || !"ETB".equalsIgnoreCase(currency)
+                || amount == null || amount.compareTo(tx.getGrossAmount()) != 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Chapa verification did not match this payment's reference, amount, currency and successful status.");
+        }
+    }
+
+    private boolean verifyChapaWebhookSignature(String rawBody, String signature, String secret) {
+        if (signature == null || signature.isBlank()) return false;
+        String supplied = signature.trim();
+        if (verifyHmacSha256(rawBody, supplied, secret)) return true;
+        // Chapa's Chapa-Signature header is HMAC(secret, secret); x-chapa-signature signs the raw payload.
+        return verifyHmacSha256(secret, supplied, secret);
+    }
+
+    private BigDecimal decimalValue(String value) {
+        if (value == null || value.isBlank()) return null;
+        try { return new BigDecimal(value.trim()).setScale(2, RoundingMode.HALF_UP); }
+        catch (NumberFormatException ex) { return null; }
+    }
+
     private boolean verifyHmacSha256(String payload, String headerSig, String secret) {
         if (headerSig == null || headerSig.isBlank()) return false;
         try {
@@ -1192,9 +1245,10 @@ public class PaymentGatewayService {
                 if (h.length() == 1) hex.append('0');
                 hex.append(h);
             }
+            String supplied = headerSig.trim().replaceFirst("(?i)^sha256=", "").toLowerCase(Locale.ROOT);
             return MessageDigest.isEqual(
                     hex.toString().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8),
-                    headerSig.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8)
+                    supplied.getBytes(StandardCharsets.UTF_8)
             );
         } catch (Exception ex) {
             return false;

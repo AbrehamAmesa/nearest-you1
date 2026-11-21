@@ -9,6 +9,7 @@ import java.util.Optional;
 
 public interface PaymentTransactionRepository extends JpaRepository<PaymentTransaction, Long> {
     Optional<PaymentTransaction> findByTxRefIgnoreCase(String txRef);
+    Optional<PaymentTransaction> findByGatewayTransactionId(String gatewayTransactionId);
     List<PaymentTransaction> findByTransactionTypeAndReferenceIdOrderByCreatedAtDesc(String transactionType, Long referenceId);
     List<PaymentTransaction> findByCustomerUidOrderByCreatedAtDesc(String customerUid);
     List<PaymentTransaction> findByProviderUidOrderByCreatedAtDesc(String providerUid);

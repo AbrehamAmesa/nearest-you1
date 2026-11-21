@@ -678,8 +678,8 @@ export interface PaymentGatewayConfig {
   platformCommissionAccount: PlatformCommissionAccountConfig;
   banks: BankDirectoryItem[];
   gateways: {
-    chapa: { enabled: boolean; mode: 'LIVE' | 'SANDBOX' | string };
-    payo: { enabled: boolean; mode: 'LIVE' | 'SANDBOX' | string };
+    chapa: { enabled: boolean; configured?: boolean; mode: 'LIVE' | 'SANDBOX' | 'NOT_CONFIGURED' | string };
+    payo: { enabled: boolean; configured?: boolean; mode: 'LIVE' | 'NOT_CONFIGURED' | string };
   };
 }
 

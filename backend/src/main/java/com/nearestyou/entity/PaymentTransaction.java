@@ -94,10 +94,10 @@ public class PaymentTransaction {
     private String payerReceiptImageUrl;
 
     @Column(name = "commission_leg_status", nullable = false)
-    private String commissionLegStatus = "PENDING"; // PENDING | COLLECTED_IN_PLATFORM_ACCOUNT
+    private String commissionLegStatus = "PENDING"; // PENDING | COLLECTED_IN_PLATFORM_ACCOUNT | GROSS_AMOUNT_COLLECTED_BY_PLATFORM
 
     @Column(name = "provider_leg_status", nullable = false)
-    private String providerLegStatus = "PENDING"; // PENDING | SETTLED_TO_PROVIDER_ACCOUNT | HELD_ESCROW | PENDING_PROVIDER_ACCOUNT_SETUP
+    private String providerLegStatus = "PENDING"; // PENDING | PENDING_PROVIDER_PAYOUT | HELD_ESCROW | PENDING_PROVIDER_ACCOUNT_SETUP
 
     @Column(nullable = false)
     private String status = "INITIALIZED"; // INITIALIZED | AWAITING_RECEIPT | PAID | FAILED | CANCELLED

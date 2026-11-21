@@ -518,7 +518,7 @@ public class OrderAndBookingService {
         booking.setPaymentStatus("CASH".equalsIgnoreCase(req.paymentMethod())
                 ? "PENDING"
                 : (isGatewayBooking ? "PENDING_PAYMENT" : "SUCCESSFUL"));
-        booking.setBookingStatus(listing.isQuoteBased() ? "PENDING" : "CONFIRMED");
+        booking.setBookingStatus(listing.isQuoteBased() ? "PENDING" : (isGatewayBooking ? "PENDING_PAYMENT" : "CONFIRMED"));
         booking.setNotes(req.notes() != null ? req.notes() : "");
         booking = bookingRepo.save(booking);
 
@@ -584,16 +584,35 @@ public class OrderAndBookingService {
         }
 
         if (principal.isAdmin() || isOwner) {
-            if (req.bookingStatus() != null) booking.setBookingStatus(req.bookingStatus());
+            if (req.bookingStatus() != null) {
+                boolean gatewayPayment = "CHAPA".equalsIgnoreCase(booking.getPaymentMethod())
+                        || "PAYO".equalsIgnoreCase(booking.getPaymentMethod());
+                boolean unpaidConfirmation = gatewayPayment && !"SUCCESSFUL".equalsIgnoreCase(booking.getPaymentStatus())
+                        && ("CONFIRMED".equalsIgnoreCase(req.bookingStatus()) || "COMPLETED".equalsIgnoreCase(req.bookingStatus()));
+                if (!principal.isAdmin() && unpaidConfirmation) {
+                    throw new ApiException(HttpStatus.CONFLICT, "This booking cannot be confirmed or completed before its payment is verified.");
+                }
+                booking.setBookingStatus(req.bookingStatus());
+            }
             if (req.quotedPrice() != null) {
                 booking.setQuotedPrice(req.quotedPrice().setScale(2, RoundingMode.HALF_UP));
                 booking.setAgreedPrice(req.quotedPrice().setScale(2, RoundingMode.HALF_UP));
             }
-            if (req.quoteApproved() != null) booking.setQuoteApproved(req.quoteApproved());
+            if (req.quoteApproved() != null) {
+                booking.setQuoteApproved(req.quoteApproved());
+                if (Boolean.TRUE.equals(req.quoteApproved())
+                        && ("CHAPA".equalsIgnoreCase(booking.getPaymentMethod()) || "PAYO".equalsIgnoreCase(booking.getPaymentMethod()))
+                        && !"SUCCESSFUL".equalsIgnoreCase(booking.getPaymentStatus())) {
+                    booking.setBookingStatus("PENDING_PAYMENT");
+                }
+            }
         } else {
             if (Boolean.TRUE.equals(req.quoteApproved()) && "QUOTED".equalsIgnoreCase(booking.getBookingStatus())) {
                 booking.setQuoteApproved(true);
-                booking.setBookingStatus("CONFIRMED");
+                boolean gatewayPayment = "CHAPA".equalsIgnoreCase(booking.getPaymentMethod())
+                        || "PAYO".equalsIgnoreCase(booking.getPaymentMethod());
+                booking.setBookingStatus(gatewayPayment && !"SUCCESSFUL".equalsIgnoreCase(booking.getPaymentStatus())
+                        ? "PENDING_PAYMENT" : "CONFIRMED");
             } else if ("CANCELLED".equalsIgnoreCase(req.bookingStatus()) && !"COMPLETED".equalsIgnoreCase(booking.getBookingStatus())) {
                 booking.setBookingStatus("CANCELLED");
             } else {
