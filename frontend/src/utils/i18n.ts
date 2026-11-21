@@ -92,6 +92,8 @@ interface Translations {
     searchPlaceholder: string;
     radius: string;
     allAddis: string;
+    allLocations: string;
+    locationNotUpdatedHint: string;
     requestCourier: string;
     heroImageBadge: string;
     heroImageCaption: string;
@@ -289,6 +291,8 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       searchPlaceholder: 'Search service, landmark, woreda, business, or license...',
       radius: 'Radius:',
       allAddis: 'All Addis',
+      allLocations: 'All',
+      locationNotUpdatedHint: 'Showing available listings · Update Exact GPS to sort nearest first',
       requestCourier: 'Request Courier or Ride Estimate',
       heroImageBadge: 'Fayda ID · Live Biometric Check · Real-Time Map',
       heroImageCaption:
@@ -494,6 +498,8 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       searchPlaceholder: 'አገልግሎት፣ አካባቢ፣ ወረዳ፣ ንግድ ወይም ፈቃድ ይፈልጉ...',
       radius: 'ርቀት:',
       allAddis: 'መላው አዲስ አበባ',
+      allLocations: 'ሁሉም',
+      locationNotUpdatedHint: 'ያሉ አገልግሎቶች እየታዩ ነው · በቅርብ ርቀት ለመደርደር ትክክለኛ ጂፒኤስ ያድሱ',
       requestCourier: 'የመላኪያ ወይም የጉዞ ዋጋ አስላ',
       heroImageBadge: 'ፋይዳ መታወቂያ · የህይወት ማረጋገጫ · ቀጥታ ካርታ',
       heroImageCaption:
@@ -693,6 +699,8 @@ export const TRANSLATIONS: Record<AppLanguage, Translations> = {
       searchPlaceholder: 'Tajaajila, naannoo, aanaa, daldala ykn hayyama barbaadi...',
       radius: 'Fageenya:',
       allAddis: 'Finfinnee Hunda',
+      allLocations: 'Hunda',
+      locationNotUpdatedHint: 'Bu’aawwan jiran hunda agarsiisaa jira · Dhiyeenyaan tartiibessuuf GPS sirrii haaromsi',
       requestCourier: 'Gatii Ergaa ykn Taksii Shallagi',
       heroImageBadge: 'Waraqaa Faydaa · Qorannoo Lubbuu · Kaartaa Yeroo Dhugaa',
       heroImageCaption:

@@ -544,7 +544,7 @@ export interface RecommendedListingItem {
   listing: Listing;
   business: Business;
   category?: Category | null;
-  distanceKm: number;
+  distanceKm?: number | null;
   effectivePrice: number | string;
   reason?: string;
 }

@@ -108,17 +108,13 @@ public class CatalogService {
             );
         }
 
-        // 2. Backend IP geolocation from request headers / remote IP (free ipwho.is)
+        // 2. Fast backend IP geolocation from request headers / remote IP (free ipwho.is)
         String clientIp = extractClientIp(request);
         if (clientIp != null && !isPrivateOrLoopbackIp(clientIp)) {
             CachedIpGeo ipGeo = lookupIpGeolocation(clientIp);
             if (ipGeo != null && geoDistanceService.isValidCoordinates(ipGeo.lat(), ipGeo.lng())) {
-                CachedAreaLabel area = reverseGeocodeArea(ipGeo.lat(), ipGeo.lng());
-                String city = (area != null && !area.city().isBlank()) ? area.city() : ipGeo.city();
-                String subCity = area != null ? area.subCity() : "";
-                String label = (area != null && !area.label().isBlank())
-                        ? area.label()
-                        : joinNonBlank(ipGeo.city(), ipGeo.region());
+                String city = ipGeo.city();
+                String label = joinNonBlank(ipGeo.city(), ipGeo.region());
                 if (label.isBlank()) {
                     label = "Detected Location";
                 }
@@ -126,7 +122,7 @@ public class CatalogService {
                         ipGeo.lat(),
                         ipGeo.lng(),
                         label,
-                        subCity,
+                        "",
                         city != null && !city.isBlank() ? city : "Addis Ababa",
                         "IP_GEOLOCATION",
                         "APPROXIMATE"
@@ -378,10 +374,16 @@ public class CatalogService {
                 if (!matchesQueryTokens(haystack, queryLower)) continue;
             }
 
-            if (biz.getLatitude() == null || biz.getLongitude() == null) continue;
-            double distanceKm = geoDistanceService.calculateDistanceKm(
-                    refLat, refLng, biz.getLatitude().doubleValue(), biz.getLongitude().doubleValue());
-            if (radiusKm != null && radiusKm > 0 && distanceKm > radiusKm) continue;
+            Double distanceKm = null;
+            if (biz.getLatitude() != null && biz.getLongitude() != null) {
+                double bizLat = biz.getLatitude().doubleValue();
+                double bizLng = biz.getLongitude().doubleValue();
+                if (geoDistanceService.isValidCoordinates(bizLat, bizLng)
+                        && !(Math.abs(bizLat) < 0.0001 && Math.abs(bizLng) < 0.0001)) {
+                    distanceKm = geoDistanceService.calculateDistanceKm(refLat, refLng, bizLat, bizLng);
+                }
+            }
+            if (radiusKm != null && radiusKm > 0 && (distanceKm == null || distanceKm > radiusKm)) continue;
 
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("listing", listing);
@@ -399,7 +401,9 @@ public class CatalogService {
         boolean activeSearch = !queryLower.isEmpty();
 
         Comparator<Map<String, Object>> nearestComparator = Comparator
-                .<Map<String, Object>>comparingDouble(m -> (Double) m.get("distanceKm"))
+                .<Map<String, Object>>comparingDouble(m -> m.get("distanceKm") != null
+                        ? ((Number) m.get("distanceKm")).doubleValue()
+                        : Double.MAX_VALUE)
                 .thenComparing(
                         m -> ((ServiceListing) m.get("listing")).getRatingAvg(),
                         Comparator.reverseOrder()
@@ -409,13 +413,19 @@ public class CatalogService {
                 ? nearestComparator
                 : switch (normalizedSort) {
                     case "PRICE_ASC" -> Comparator.<Map<String, Object>, BigDecimal>comparing(m -> (BigDecimal) m.get("effectivePrice"))
-                            .thenComparingDouble(m -> (Double) m.get("distanceKm"));
+                            .thenComparingDouble(m -> m.get("distanceKm") != null
+                                    ? ((Number) m.get("distanceKm")).doubleValue()
+                                    : Double.MAX_VALUE);
                     case "PRICE_DESC" -> Comparator.<Map<String, Object>, BigDecimal>comparing(m -> (BigDecimal) m.get("effectivePrice"))
                             .reversed()
-                            .thenComparingDouble(m -> (Double) m.get("distanceKm"));
+                            .thenComparingDouble(m -> m.get("distanceKm") != null
+                                    ? ((Number) m.get("distanceKm")).doubleValue()
+                                    : Double.MAX_VALUE);
                     case "RATING" -> Comparator.<Map<String, Object>, BigDecimal>comparing(m -> ((ServiceListing) m.get("listing")).getRatingAvg())
                             .reversed()
-                            .thenComparingDouble(m -> (Double) m.get("distanceKm"));
+                            .thenComparingDouble(m -> m.get("distanceKm") != null
+                                    ? ((Number) m.get("distanceKm")).doubleValue()
+                                    : Double.MAX_VALUE);
                     default -> nearestComparator;
                 };
         results.sort(comparator);
@@ -848,10 +858,17 @@ public class CatalogService {
 
         for (ServiceListing listing : activeListings) {
             Business biz = bizMap.get(listing.getBusinessId());
-            if (biz == null || biz.getLatitude() == null || biz.getLongitude() == null) continue;
+            if (biz == null) continue;
 
-            double distanceKm = geoDistanceService.calculateDistanceKm(
-                    refLat, refLng, biz.getLatitude().doubleValue(), biz.getLongitude().doubleValue());
+            Double distanceKm = null;
+            if (biz.getLatitude() != null && biz.getLongitude() != null) {
+                double bizLat = biz.getLatitude().doubleValue();
+                double bizLng = biz.getLongitude().doubleValue();
+                if (geoDistanceService.isValidCoordinates(bizLat, bizLng)
+                        && !(Math.abs(bizLat) < 0.0001 && Math.abs(bizLng) < 0.0001)) {
+                    distanceKm = geoDistanceService.calculateDistanceKm(refLat, refLng, bizLat, bizLng);
+                }
+            }
             BigDecimal effectivePrice = listing.getDiscountPrice() != null
                     ? listing.getDiscountPrice()
                     : listing.getBasePrice();
@@ -862,7 +879,7 @@ public class CatalogService {
                 reason = biz.isFaydaVerified()
                         ? "Fayda-verified job seeker near you"
                         : "Individual job seeker advertising nearby";
-            } else if (distanceKm <= 2.0 && biz.isLiveLocationActive()) {
+            } else if (distanceKm != null && distanceKm <= 2.0 && biz.isLiveLocationActive()) {
                 reason = "Closest live GPS provider right near you";
             } else if (biz.isFaydaVerified() && biz.isLivenessVerified()) {
                 reason = "Fayda-verified nearby option";
@@ -886,7 +903,9 @@ public class CatalogService {
         }
 
         Comparator<Map<String, Object>> recComparator = Comparator
-                .<Map<String, Object>>comparingDouble(m -> (Double) m.get("distanceKm"))
+                .<Map<String, Object>>comparingDouble(m -> m.get("distanceKm") != null
+                        ? ((Number) m.get("distanceKm")).doubleValue()
+                        : Double.MAX_VALUE)
                 .thenComparing(m -> !((Business) m.get("business")).isLiveLocationActive())
                 .thenComparing(
                         m -> ((ServiceListing) m.get("listing")).getRatingAvg(),
@@ -1067,7 +1086,7 @@ public class CatalogService {
             String url = "https://ipwho.is/" + ip + "?fields=success,latitude,longitude,city,region";
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .timeout(Duration.ofMillis(2200))
+                    .timeout(Duration.ofMillis(1000))
                     .header("Accept", "application/json")
                     .GET()
                     .build();

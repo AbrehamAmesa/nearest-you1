@@ -458,17 +458,20 @@ function NearestYouWorkspace() {
     try {
       const response = await catalogApi.getCatalog(targetCoords);
       const data = response.data;
+      const staleNonGpsResult = !coords && !targetCoords && Boolean(exactGpsRef.current);
       setCategories(data.categories || []);
       setDocumentRequirements(data.documentRequirements || []);
       setBusinesses(data.businesses || []);
       setListings(data.listings || []);
       setLiveProviders(data.liveProviders || []);
-      setRecommendations(data.recommendations || []);
+      if (!staleNonGpsResult) {
+        setRecommendations(data.recommendations || []);
+      }
       setReviews(data.reviews || []);
       if (Array.isArray(data.knownLocations)) {
         setKnownLocations(data.knownLocations);
       }
-      if (data.detectedLocation) {
+      if (!staleNonGpsResult && data.detectedLocation) {
         setDetectedLocation(data.detectedLocation);
         if (data.detectedLocation.subCity) {
           setProfileSubCity((prev) =>
@@ -623,9 +626,8 @@ function NearestYouWorkspace() {
   );
 
   useEffect(() => {
-    loadCatalog().then(() => {
-      detectExactLocation(false);
-    });
+    void loadCatalog();
+    detectExactLocation(false);
   }, [loadCatalog, detectExactLocation]);
 
   useEffect(() => {

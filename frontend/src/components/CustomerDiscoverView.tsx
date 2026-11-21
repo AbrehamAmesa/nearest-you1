@@ -160,10 +160,19 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
   const t = TRANSLATIONS[language].discover;
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>('ALL');
-  const [maxRadiusKm, setMaxRadiusKm] = useState<number>(25);
+  const [maxRadiusKm, setMaxRadiusKm] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState<
     'DISTANCE' | 'PRICE_ASC' | 'PRICE_DESC' | 'RATING' | 'NEWEST'
   >('DISTANCE');
+
+  const hasExactLocation =
+    detectedLocation.source === 'GPS' || detectedLocation.accuracyMode === 'EXACT';
+
+  useEffect(() => {
+    if (hasExactLocation) {
+      setSortBy('DISTANCE');
+    }
+  }, [hasExactLocation, userLat, userLng]);
 
   // Expanded Filtration Options (collapsed by default on mobile phones for cleaner scroll)
   const [viewMode, setViewMode] = useState<'GRID' | 'SPLIT' | 'MAP'>('SPLIT');
@@ -186,7 +195,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
     listing: Listing;
     business: Business;
     category?: Category | null;
-    distanceKm: number;
+    distanceKm: number | null;
     effectivePrice: number;
   }> | null>(null);
   const searchSeqRef = useRef(0);
@@ -237,7 +246,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
           listingType: listingTypeFilter !== 'ALL' ? listingTypeFilter : undefined,
           lat: userLat,
           lng: userLng,
-          radiusKm: maxRadiusKm,
+          radiusKm: maxRadiusKm ?? undefined,
           minPrice: minPriceEtb ? Number(minPriceEtb) : undefined,
           maxPrice: maxPriceEtb ? Number(maxPriceEtb) : undefined,
           minRating: minRating > 0 ? minRating : undefined,
@@ -253,7 +262,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
               listing: r.listing,
               business: r.business,
               category: r.category || categoryById[r.listing?.categoryId],
-              distanceKm: Number(r.distanceKm ?? 0),
+              distanceKm: r.distanceKm != null ? Number(r.distanceKm) : null,
               effectivePrice: Number(r.effectivePrice ?? r.listing?.discountPrice ?? r.listing?.basePrice ?? 0),
             }))
           );
@@ -300,6 +309,17 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
     const minP = minPriceEtb ? Number(minPriceEtb) : null;
     const maxP = maxPriceEtb ? Number(maxPriceEtb) : null;
 
+    const hasValidBizCoords = (biz: Business): { lat: number; lng: number } | null => {
+      if (biz.latitude === null || biz.latitude === undefined || biz.longitude === null || biz.longitude === undefined) {
+        return null;
+      }
+      const lat = Number(biz.latitude);
+      const lng = Number(biz.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      if (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001) return null;
+      return { lat, lng };
+    };
+
     // When visual image/camera search is active and user hasn't typed a new text query, display matched items nearest-first
     if (!q && visualSearch) {
       return visualSearch.results
@@ -323,11 +343,11 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
           item: row.listing,
           biz: row.business,
           cat: row.category || categoryById[row.listing.categoryId],
-          distanceKm: Number(row.distanceKm ?? 0),
+          distanceKm: row.distanceKm != null ? Number(row.distanceKm) : null,
           effectivePrice: Number(row.effectivePrice ?? row.listing.discountPrice ?? row.listing.basePrice),
           visualImageMatch: Boolean(row.visualImageMatch),
         }))
-        .sort((a, b) => a.distanceKm - b.distanceKm);
+        .sort((a, b) => (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE));
     }
 
     // When backend search results exist for the active query, refine with client-only toggles and preserve nearest-first order
@@ -358,7 +378,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
           effectivePrice: row.effectivePrice,
           visualImageMatch: false,
         }))
-        .sort((a, b) => a.distanceKm - b.distanceKm);
+        .sort((a, b) => (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE));
     }
 
     return listings
@@ -393,8 +413,12 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
         if (maxP !== null && Number.isFinite(maxP) && effective > maxP) return false;
         if (minRating > 0 && Number(item.ratingAvg) < minRating) return false;
 
-        const dist = calculateDistanceKm(userLat, userLng, Number(biz.latitude), Number(biz.longitude));
-        if (dist > maxRadiusKm) return false;
+        if (maxRadiusKm !== null) {
+          const coords = hasValidBizCoords(biz);
+          if (!coords) return false;
+          const dist = calculateDistanceKm(userLat, userLng, coords.lat, coords.lng);
+          if (dist > maxRadiusKm) return false;
+        }
 
         if (q) {
           const metaText = [
@@ -415,20 +439,22 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
       .map((item) => {
         const biz = businessById[item.businessId]!;
         const cat = categoryById[item.categoryId];
-        const distanceKm = calculateDistanceKm(
-          userLat,
-          userLng,
-          Number(biz.latitude),
-          Number(biz.longitude)
-        );
+        const coords = hasValidBizCoords(biz);
+        const distanceKm = coords
+          ? calculateDistanceKm(userLat, userLng, coords.lat, coords.lng)
+          : null;
         const effectivePrice = item.discountPrice
           ? Number(item.discountPrice)
           : Number(item.basePrice);
         return { item, biz, cat, distanceKm, effectivePrice, visualImageMatch: false };
       })
       .sort((a, b) => {
-        // Active search always prioritizes nearest results first
-        if (q || sortBy === 'DISTANCE') return a.distanceKm - b.distanceKm;
+        // Active search or DISTANCE sort prioritizes nearest results first when location is available
+        if (q || sortBy === 'DISTANCE') {
+          const diff = (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE);
+          if (diff !== 0) return diff;
+          return Number(b.item.ratingAvg) - Number(a.item.ratingAvg);
+        }
         if (sortBy === 'PRICE_ASC') return a.effectivePrice - b.effectivePrice;
         if (sortBy === 'PRICE_DESC') return b.effectivePrice - a.effectivePrice;
         if (sortBy === 'NEWEST') {
@@ -461,17 +487,44 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
     userLng,
   ]);
 
-  // Backend-resolved recommendations shown before searching; falls back cleanly to nearest listings if backend list isn't populated yet
+  // Backend-resolved recommendations shown before searching; falls back cleanly to active listings even before exact GPS is acquired, and sorts nearest-first when location updates
   const effectiveRecommendations = useMemo(() => {
+    const computeLiveDist = (biz: Business, fallbackDist?: number | null): number | null => {
+      if (
+        biz.latitude !== null &&
+        biz.latitude !== undefined &&
+        biz.longitude !== null &&
+        biz.longitude !== undefined
+      ) {
+        const lat = Number(biz.latitude);
+        const lng = Number(biz.longitude);
+        if (
+          Number.isFinite(lat) &&
+          Number.isFinite(lng) &&
+          !(Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001)
+        ) {
+          return calculateDistanceKm(userLat, userLng, lat, lng);
+        }
+      }
+      return fallbackDist != null ? Number(fallbackDist) : null;
+    };
+
     if (recommendations && recommendations.length > 0) {
-      return recommendations.map((rec) => ({
+      const mapped = recommendations.map((rec) => ({
         listing: rec.listing,
         business: rec.business,
         category: rec.category || categoryById[rec.listing.categoryId],
-        distanceKm: Number(rec.distanceKm ?? 0),
+        distanceKm: computeLiveDist(rec.business, rec.distanceKm),
         reason: rec.reason || '',
       }));
+      if (hasExactLocation) {
+        mapped.sort(
+          (a, b) => (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE)
+        );
+      }
+      return mapped;
     }
+
     return listings
       .filter((item) => item.status === 'ACTIVE' && businessById[item.businessId])
       .map((item) => {
@@ -480,20 +533,22 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
           listing: item,
           business,
           category: categoryById[item.categoryId],
-          distanceKm: calculateDistanceKm(
-            userLat,
-            userLng,
-            Number(business.latitude),
-            Number(business.longitude)
-          ),
+          distanceKm: computeLiveDist(business, null),
           reason: business.liveLocationActive
             ? 'Live GPS provider nearby'
-            : 'Nearest active service to your location',
+            : 'Recommended active service',
         };
       })
-      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .sort((a, b) => {
+        const availA = a.listing.availabilityStatus === 'AVAILABLE' ? 0 : 1;
+        const availB = b.listing.availabilityStatus === 'AVAILABLE' ? 0 : 1;
+        if (availA !== availB) return availA - availB;
+        const distDiff = (a.distanceKm ?? Number.MAX_VALUE) - (b.distanceKm ?? Number.MAX_VALUE);
+        if (distDiff !== 0) return distDiff;
+        return Number(b.listing.ratingAvg) - Number(a.listing.ratingAvg);
+      })
       .slice(0, 6);
-  }, [recommendations, listings, businessById, categoryById, userLat, userLng]);
+  }, [recommendations, listings, businessById, categoryById, userLat, userLng, hasExactLocation]);
 
   const filteredBusinessesForMap = useMemo(() => {
     const ids = new Set(enrichedListings.map((e) => e.biz.id));
@@ -506,8 +561,10 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
       const cat = categoryById[p.serviceCategoryId];
       if (activeCategorySlug !== 'ALL' && cat?.slug !== activeCategorySlug) return false;
       if (liveLocationOnly && !p.isLiveLocationActive) return false;
-      const dist = calculateDistanceKm(userLat, userLng, Number(p.latitude), Number(p.longitude));
-      if (dist > maxRadiusKm) return false;
+      if (maxRadiusKm !== null) {
+        const dist = calculateDistanceKm(userLat, userLng, Number(p.latitude), Number(p.longitude));
+        if (dist > maxRadiusKm) return false;
+      }
       if (q) {
         const hay = `${p.fullName} ${p.subCity} ${p.landmark} ${cat?.name || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -530,7 +587,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
     setBackendSearchRows(null);
     setVisualSearch(null);
     setActiveCategorySlug('ALL');
-    setMaxRadiusKm(25);
+    setMaxRadiusKm(null);
     setListingTypeFilter('ALL');
     setPricingModelFilter('ALL');
     setMinPriceEtb('');
@@ -692,9 +749,9 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
               <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-[#172B3A]/70">
                   <span>{t.radius}</span>
-                  {[3, 5, 10, 25].map((km) => (
+                  {([null, 3, 5, 10, 25] as const).map((km) => (
                     <button
-                      key={km}
+                      key={km === null ? 'ALL' : km}
                       type="button"
                       onClick={() => setMaxRadiusKm(km)}
                       className={`min-h-[34px] rounded-md px-2.5 py-1 font-mono text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
@@ -703,7 +760,7 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                           : 'bg-[#F4F6F5] text-[#172B3A]/75 hover:text-[#172B3A]'
                       }`}
                     >
-                      {km === 25 ? t.allAddis : `${km} km`}
+                      {km === null ? t.allLocations : `${km} km`}
                     </button>
                   ))}
                 </div>
@@ -748,7 +805,9 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
               <div className="flex items-center gap-2 text-xs font-semibold text-[#176B52]">
                 <Compass className="h-4 w-4" />
                 <span>
-                  {locationDisplay} · {t.nearestFirstBadge}
+                  {hasExactLocation
+                    ? `${locationDisplay} · ${t.nearestFirstBadge}`
+                    : t.locationNotUpdatedHint}
                 </span>
               </div>
               <h2 className="mt-1 font-display text-xl font-bold text-[#172B3A]">
@@ -794,7 +853,9 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                           {getCategoryLabel(category, language, listing.listingType)}
                         </span>
                         <span className="shrink-0 font-mono font-bold tabular-nums text-[#172B3A]">
-                          {distanceKm} km
+                          {distanceKm !== null && (hasExactLocation || distanceKm <= 300)
+                            ? `${distanceKm} km`
+                            : business.subCity || 'Ethiopia'}
                         </span>
                       </div>
                       <button
@@ -1220,7 +1281,9 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
               </h2>
               {(isSearching || sortBy === 'DISTANCE') && (
                 <span className="font-mono text-xs font-medium text-[#176B52]">
-                  {t.nearestFirstBadge} · {locationDisplay}
+                  {hasExactLocation
+                    ? `${t.nearestFirstBadge} · ${locationDisplay}`
+                    : t.locationNotUpdatedHint}
                 </span>
               )}
             </div>
@@ -1242,7 +1305,8 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
             ) : enrichedListings.length === 0 ? (
               <div className="rounded-2xl border border-[#172B3A]/10 bg-white px-6 py-16 text-center">
                 <p className="font-display text-lg font-semibold text-[#172B3A]">
-                  {t.noResults} ({maxRadiusKm} km · {locationDisplay})
+                  {t.noResults} ({maxRadiusKm !== null ? `${maxRadiusKm} km · ` : ''}
+                  {locationDisplay})
                 </p>
                 <p className="mt-1 text-sm text-[#172B3A]/65">{t.noResultsHint}</p>
                 <button
@@ -1300,7 +1364,9 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                               </span>
                               <span aria-hidden="true">·</span>
                               <span className="font-mono font-semibold tabular-nums text-[#172B3A]">
-                                {distanceKm} km
+                                {distanceKm !== null && (hasExactLocation || distanceKm <= 300)
+                                  ? `${distanceKm} km`
+                                  : biz.subCity || 'Ethiopia'}
                               </span>
                               {biz.liveLocationActive && (
                                 <>

@@ -19,7 +19,7 @@ interface ImageSearchModalProps {
   initialMode: 'camera' | 'upload';
   userLat: number;
   userLng: number;
-  radiusKm: number;
+  radiusKm?: number | null;
   language: AppLanguage;
   onClose: () => void;
   onResults: (payload: {
@@ -199,7 +199,7 @@ export const ImageSearchModal: React.FC<ImageSearchModalProps> = ({
           mimeType: img.mimeType,
           lat: userLat,
           lng: userLng,
-          radiusKm,
+          ...(radiusKm != null && radiusKm > 0 ? { radiusKm } : {}),
         });
         const data = res.data;
         const analysis: ImageSearchAnalysis = data?.analysis || {
