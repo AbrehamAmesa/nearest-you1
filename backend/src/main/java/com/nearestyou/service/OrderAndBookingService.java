@@ -543,11 +543,6 @@ public class OrderAndBookingService {
         booking.setNotes(req.notes() != null ? req.notes() : "");
         booking = bookingRepo.save(booking);
 
-        double taxRate = 15.0;
-        Optional<PlatformSetting> policyOpt = settingRepo.findBySettingKey("pricing_policy");
-        if (policyOpt.isPresent() && policyOpt.get().getSettingValue().get("taxRatePercent") instanceof Number n) {
-            taxRate = n.doubleValue();
-        }
         BigDecimal taxableAmount = agreedBd.subtract(BigDecimal.valueOf(deposit)).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         BigDecimal vatAmount = taxableAmount.multiply(BigDecimal.valueOf(taxRate / 100.0)).setScale(2, RoundingMode.HALF_UP);
         BigDecimal whtAmount = taxableAmount.compareTo(new BigDecimal("3000.00")) >= 0
