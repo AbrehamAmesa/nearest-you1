@@ -376,8 +376,35 @@ export interface DeliveryRecord {
   conflictCounterStatement?: string | null;
   conflictResolution?: string | null;
   conflictResolvedAt?: string | null;
+  paymentDetails?: DeliveryPaymentSummary | null;
   status: string;
   createdAt: string;
+}
+
+export interface DeliveryPaymentSummary {
+  txRef?: string | null;
+  gateway?: string | null;
+  gatewayMode?: string | null;
+  gatewayTransactionId?: string | null;
+  payerReceiptReference?: string | null;
+  payerReceiptImageUrl?: string | null;
+  paymentMethod?: string | null;
+  paymentStatus?: string | null;
+  escrowStatus?: string | null;
+  currency?: string | null;
+  grossAmount?: string | number | null;
+  taxAmount?: string | number | null;
+  commissionAmount?: string | number | null;
+  providerAmount?: string | number | null;
+  commissionLegStatus?: string | null;
+  providerLegStatus?: string | null;
+  paidAt?: string | null;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  receiverName?: string | null;
+  referenceCode?: string | null;
+  providerPayoutAccountSnapshot?: AccountSnapshot | null;
+  platformCommissionAccountSnapshot?: AccountSnapshot | null;
 }
 
 export interface JobApplicationRecord {

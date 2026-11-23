@@ -21,6 +21,7 @@ export interface AppNotification {
   actionTarget?: AppSection;
   targetTab?: string;
   threadKey?: string;
+  paymentTxRef?: string;
   onAction?: () => void;
 }
 
@@ -110,7 +111,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
 
         const HeaderIcon = isMessage ? MessageSquare : Bell;
 
-        const hasAction = Boolean(item.onAction || item.actionTarget || item.threadKey);
+        const hasAction = Boolean(
+          item.onAction || item.actionTarget || item.threadKey || item.paymentTxRef
+        );
 
         return (
           <div

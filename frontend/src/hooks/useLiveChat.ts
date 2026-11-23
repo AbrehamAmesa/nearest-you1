@@ -7,6 +7,7 @@ import type {
   DeliveryRecord,
   JobApplicationRecord,
   OrderRecord,
+  PaymentTransactionRecord,
   ServiceContractRecord,
 } from '../types/nearestyou.ts';
 
@@ -376,6 +377,15 @@ export interface DeliveryUpdatedWsEvent {
   delivery: Partial<DeliveryRecord> & { id: number; trackingCode: string; status: string };
 }
 
+export interface PaymentSettledWsEvent {
+  type: 'payment:settled';
+  actorUid?: string | null;
+  ownerUid?: string | null;
+  customerUid?: string | null;
+  providerUid?: string | null;
+  payment: PaymentTransactionRecord;
+}
+
 export interface InboxListenerHandlers {
   onIncomingMessage?: (msg: ChatMessage, meta?: IncomingMessageMeta) => void;
   onContractUpdated?: (contract: ServiceContractRecord, event?: ContractUpdatedWsEvent) => void;
@@ -383,6 +393,7 @@ export interface InboxListenerHandlers {
   onBookingUpdated?: (event: BookingUpdatedWsEvent) => void;
   onApplicationUpdated?: (event: ApplicationUpdatedWsEvent) => void;
   onDeliveryUpdated?: (event: DeliveryUpdatedWsEvent) => void;
+  onPaymentSettled?: (event: PaymentSettledWsEvent) => void;
 }
 
 export function useLiveChatInboxListener(
@@ -447,6 +458,8 @@ export function useLiveChatInboxListener(
               handlersRef.current.onApplicationUpdated?.(payload as ApplicationUpdatedWsEvent);
             } else if (payload.type === 'delivery:updated' && payload.delivery) {
               handlersRef.current.onDeliveryUpdated?.(payload as DeliveryUpdatedWsEvent);
+            } else if (payload.type === 'payment:settled' && payload.payment) {
+              handlersRef.current.onPaymentSettled?.(payload as PaymentSettledWsEvent);
             }
           } catch {
             /* ignore */

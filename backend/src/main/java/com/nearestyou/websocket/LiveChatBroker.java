@@ -9,6 +9,7 @@ import com.nearestyou.entity.CustomerOrder;
 import com.nearestyou.entity.DeliveryRequest;
 import com.nearestyou.entity.JobApplication;
 import com.nearestyou.entity.Message;
+import com.nearestyou.entity.PaymentTransaction;
 import com.nearestyou.entity.ServiceContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -210,5 +211,17 @@ public class LiveChatBroker {
         envelope.put("actorUid", actorUid);
         envelope.put("delivery", safeDelivery);
         sendEnvelopeToTargets(null, envelope, delivery.getCustomerUid(), delivery.getDriverUid());
+    }
+
+    public void broadcastPaymentSettledEvent(PaymentTransaction tx, String ownerUid, String actorUid) {
+        if (tx == null) return;
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("type", "payment:settled");
+        envelope.put("actorUid", actorUid);
+        envelope.put("ownerUid", ownerUid);
+        envelope.put("customerUid", tx.getCustomerUid());
+        envelope.put("providerUid", tx.getProviderUid());
+        envelope.put("payment", tx);
+        sendEnvelopeToTargets(null, envelope, tx.getCustomerUid(), tx.getProviderUid(), ownerUid);
     }
 }

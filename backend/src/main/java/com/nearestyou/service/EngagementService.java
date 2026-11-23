@@ -31,6 +31,7 @@ public class EngagementService {
     private final UserAccountRepository userRepo;
     private final ProviderRegistrationRepository providerRepo;
     private final ServiceContractRepository contractRepo;
+    private final PaymentTransactionRepository paymentRepo;
     private final LiveChatBroker liveChatBroker;
 
     public EngagementService(
@@ -46,6 +47,7 @@ public class EngagementService {
             UserAccountRepository userRepo,
             ProviderRegistrationRepository providerRepo,
             ServiceContractRepository contractRepo,
+            PaymentTransactionRepository paymentRepo,
             LiveChatBroker liveChatBroker
     ) {
         this.favoriteRepo = favoriteRepo;
@@ -60,6 +62,7 @@ public class EngagementService {
         this.userRepo = userRepo;
         this.providerRepo = providerRepo;
         this.contractRepo = contractRepo;
+        this.paymentRepo = paymentRepo;
         this.liveChatBroker = liveChatBroker;
     }
 
@@ -1160,6 +1163,41 @@ public class EngagementService {
                     "View Application",
                     a.getCreatedAt() != null ? a.getCreatedAt() : Instant.now()
             ));
+        }
+
+        // 9. Paid settlements received by provider / business owner / driver
+        Map<Long, PaymentTransaction> receiverPayments = new LinkedHashMap<>();
+        if (!ownedBizIds.isEmpty()) {
+            for (PaymentTransaction ptx : paymentRepo.findByBusinessIdInOrderByCreatedAtDesc(ownedBizIds)) {
+                receiverPayments.put(ptx.getId(), ptx);
+            }
+        }
+        for (PaymentTransaction ptx : paymentRepo.findByProviderUidOrderByCreatedAtDesc(uid)) {
+            receiverPayments.put(ptx.getId(), ptx);
+        }
+        for (PaymentTransaction ptx : receiverPayments.values()) {
+            if (!"PAID".equalsIgnoreCase(ptx.getStatus())) continue;
+            if (myUids.contains(ptx.getCustomerUid())) continue;
+            Instant ts = ptx.getPaidAt() != null ? ptx.getPaidAt() : ptx.getCreatedAt();
+            if (ts != null && ts.isBefore(sevenDaysAgo)) continue;
+            boolean isDispatch = "DELIVERY".equalsIgnoreCase(ptx.getTransactionType())
+                    || "RIDE".equalsIgnoreCase(ptx.getTransactionType());
+            String payer = ptx.getCustomerName() != null && !ptx.getCustomerName().isBlank()
+                    ? ptx.getCustomerName() : "Customer";
+            Map<String, Object> notif = buildNotificationMap(
+                    "payment-received:" + ptx.getTxRef(),
+                    "offer",
+                    "Payment Received · " + ptx.getReferenceCode(),
+                    payer + " paid " + ptx.getGrossAmount() + " ETB via " + ptx.getGateway()
+                            + " (Your Net: " + ptx.getProviderAmount() + " ETB).",
+                    isDispatch ? "delivery" : "business",
+                    isDispatch ? "DRIVER" : "PAYOUTS",
+                    null,
+                    "Open Payment Details",
+                    ts != null ? ts : Instant.now()
+            );
+            notif.put("paymentTxRef", ptx.getTxRef());
+            items.add(notif);
         }
 
         items.sort(Comparator.comparingLong(m -> ((Number) m.getOrDefault("createdAtMs", 0L)).longValue()));

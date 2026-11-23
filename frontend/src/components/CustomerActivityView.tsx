@@ -8,6 +8,7 @@ import {
   MessageSquareWarning,
   Pencil,
   Radio,
+  Receipt,
   ShieldCheck,
   Star,
   Trash2,
@@ -32,6 +33,7 @@ import { useLiveChatInboxListener } from '../hooks/useLiveChat.ts';
 import { ContractOfferSection } from './ContractOfferSection.tsx';
 import { LiveChatDrawer, type ActiveChatTarget } from './LiveChatDrawer.tsx';
 import { LiveChatPanel } from './LiveChatPanel.tsx';
+import { PaymentDetailsModal, type PaymentReferenceLookup } from './PaymentDetailsModal.tsx';
 import { LiveDriverTrackerMap } from './ServiceMap.tsx';
 
 export type ActivityTab =
@@ -87,6 +89,10 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
     requestedThreadKey ?? null
   );
   const [chatDrawerTarget, setChatDrawerTarget] = useState<ActiveChatTarget | null>(null);
+  const [paymentDetailsModal, setPaymentDetailsModal] = useState<{
+    transaction?: PaymentTransactionRecord | null;
+    lookup?: PaymentReferenceLookup | null;
+  } | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [contractRefreshSignal, setContractRefreshSignal] = useState(0);
   const chatSectionRef = useRef<HTMLDivElement>(null);
@@ -558,6 +564,39 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                               Complete {ord.paymentMethod} Payment
                             </button>
                           )}
+                        {(() => {
+                          const matchedPtx = myPayments.find(
+                            (p) => p.transactionType === 'ORDER' && p.referenceId === ord.id
+                          );
+                          if (ord.paymentStatus !== 'SUCCESSFUL' && !matchedPtx) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPaymentDetailsModal({
+                                  transaction: matchedPtx || null,
+                                  lookup: matchedPtx
+                                    ? null
+                                    : {
+                                        transactionType: 'ORDER',
+                                        referenceId: ord.id,
+                                        referenceCode: ord.orderNumber,
+                                        customerName: ord.customerName,
+                                        paymentMethod: ord.paymentMethod,
+                                        paymentStatus: ord.paymentStatus,
+                                        grossAmount: ord.totalAmount,
+                                        taxAmount: ord.taxAmount,
+                                        createdAt: ord.createdAt,
+                                      },
+                                })
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-[#176B52] hover:bg-emerald-100"
+                            >
+                              <Receipt className="h-3.5 w-3.5" />
+                              Payment Details
+                            </button>
+                          );
+                        })()}
                         {canCancel && (
                           <button
                             type="button"
@@ -686,6 +725,38 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                               Complete {b.paymentMethod} Payment
                             </button>
                           )}
+                        {(() => {
+                          const matchedPtx = myPayments.find(
+                            (p) => p.transactionType === 'BOOKING' && p.referenceId === b.id
+                          );
+                          if (b.paymentStatus !== 'SUCCESSFUL' && !matchedPtx) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPaymentDetailsModal({
+                                  transaction: matchedPtx || null,
+                                  lookup: matchedPtx
+                                    ? null
+                                    : {
+                                        transactionType: 'BOOKING',
+                                        referenceId: b.id,
+                                        referenceCode: b.bookingReference,
+                                        customerName: b.customerName,
+                                        paymentMethod: b.paymentMethod,
+                                        paymentStatus: b.paymentStatus,
+                                        grossAmount: b.quotedPrice || b.agreedPrice,
+                                        createdAt: b.createdAt,
+                                      },
+                                })
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-[#176B52] hover:bg-emerald-100"
+                            >
+                              <Receipt className="h-3.5 w-3.5" />
+                              Payment Details
+                            </button>
+                          );
+                        })()}
                         <button
                           type="button"
                           onClick={() =>
@@ -876,6 +947,43 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                             Complete {d.paymentMethod} Payment
                           </button>
                         )}
+                      {(() => {
+                        const matchedPtx = myPayments.find(
+                          (p) =>
+                            (p.transactionType === 'DELIVERY' || p.transactionType === 'RIDE') &&
+                            p.referenceId === d.id
+                        );
+                        if (d.escrowStatus === 'AWAITING_PAYMENT' && !matchedPtx) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPaymentDetailsModal({
+                                transaction: matchedPtx || null,
+                                lookup: matchedPtx
+                                  ? null
+                                  : {
+                                      transactionType:
+                                        d.requestType === 'RIDE' ? 'RIDE' : 'DELIVERY',
+                                      referenceId: d.id,
+                                      referenceCode: d.trackingCode,
+                                      customerName: d.customerName,
+                                      paymentMethod: d.paymentMethod,
+                                      paymentStatus: d.escrowStatus,
+                                      grossAmount: d.totalFee,
+                                      taxAmount: d.taxAmount,
+                                      escrowStatus: d.escrowStatus,
+                                      createdAt: d.createdAt,
+                                    },
+                              })
+                            }
+                            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-emerald-50/70 px-3 py-1.5 text-xs font-semibold text-[#176B52] hover:bg-emerald-100"
+                          >
+                            <Receipt className="h-3.5 w-3.5" />
+                            Payment Details
+                          </button>
+                        );
+                      })()}
                       {d.status !== 'CANCELLED' && (
                         <button
                           type="button"
@@ -1369,6 +1477,13 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
         target={chatDrawerTarget}
         onClose={() => setChatDrawerTarget(null)}
         onMessageReceived={() => loadThreadsOnly()}
+      />
+      <PaymentDetailsModal
+        open={Boolean(paymentDetailsModal)}
+        transaction={paymentDetailsModal?.transaction}
+        lookup={paymentDetailsModal?.lookup}
+        viewerRole="PAYER"
+        onClose={() => setPaymentDetailsModal(null)}
       />
     </div>
   );

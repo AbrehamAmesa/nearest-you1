@@ -149,6 +149,14 @@ export const paymentApi = {
   ) => api.post(`/api/v1/payments/payo/${encodeURIComponent(txRef)}/confirm`, payload),
   getMine: () => api.get('/api/v1/payments/mine'),
   getProviderSettlements: () => api.get('/api/v1/payments/provider-settlements'),
+  getByTxRef: (txRef: string) => api.get(`/api/v1/payments/by-tx/${encodeURIComponent(txRef)}`),
+  getByReference: (
+    transactionType: 'ORDER' | 'BOOKING' | 'DELIVERY' | 'RIDE' | string,
+    referenceId: number
+  ) =>
+    api.get('/api/v1/payments/by-reference', {
+      params: { transactionType, referenceId },
+    }),
 };
 
 // OpenStreetMap / OSRM public services (not Spring controller endpoints)

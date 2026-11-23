@@ -228,7 +228,9 @@ export const TopBar: React.FC<TopBarProps> = ({
                       const isMessage = item.kind === 'message';
                       const isError = item.kind === 'error';
                       const ItemIcon = isMessage ? MessageSquare : Bell;
-                      const hasAction = Boolean(item.onAction || item.actionTarget || item.threadKey);
+                      const hasAction = Boolean(
+                        item.onAction || item.actionTarget || item.threadKey || item.paymentTxRef
+                      );
                       const handleRowAction = () => {
                         if (!hasAction) return;
                         onExecuteNotificationAction(item);

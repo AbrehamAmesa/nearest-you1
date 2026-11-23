@@ -93,11 +93,21 @@ public class BusinessAndListingService {
         List<CommissionRecord> scopedCommissions = bizIds.isEmpty() ? List.of() : commissionRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds);
         List<Review> scopedReviews = bizIds.isEmpty() ? List.of() : reviewRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds);
         List<ServiceContract> scopedContracts = bizIds.isEmpty() ? List.of() : contractRepo.findByBusinessIdInOrderByUpdatedAtDesc(bizIds);
-        List<PaymentTransaction> scopedPayments = principal.isAdmin()
-                ? paymentRepo.findAllByOrderByCreatedAtDesc()
-                : (bizIds.isEmpty()
-                        ? paymentRepo.findByProviderUidOrderByCreatedAtDesc(principal.uid())
-                        : paymentRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds));
+        List<PaymentTransaction> scopedPayments;
+        if (principal.isAdmin()) {
+            scopedPayments = paymentRepo.findAllByOrderByCreatedAtDesc();
+        } else {
+            Map<Long, PaymentTransaction> mergedPayments = new LinkedHashMap<>();
+            if (!bizIds.isEmpty()) {
+                for (PaymentTransaction ptx : paymentRepo.findByBusinessIdInOrderByCreatedAtDesc(bizIds)) {
+                    mergedPayments.put(ptx.getId(), ptx);
+                }
+            }
+            for (PaymentTransaction ptx : paymentRepo.findByProviderUidOrderByCreatedAtDesc(principal.uid())) {
+                mergedPayments.put(ptx.getId(), ptx);
+            }
+            scopedPayments = new ArrayList<>(mergedPayments.values());
+        }
         ProviderRegistration reg = providerRepo.findFirstByUserUidOrderByUpdatedAtDesc(principal.uid()).orElse(null);
 
         Map<String, Object> out = new LinkedHashMap<>();

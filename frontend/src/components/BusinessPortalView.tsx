@@ -16,6 +16,7 @@ import {
   Plus,
   QrCode,
   Radio,
+  Receipt,
   ShieldCheck,
   ShieldOff,
   Upload,
@@ -61,6 +62,7 @@ import { ContractOfferSection } from './ContractOfferSection.tsx';
 import { ListingVisual } from './ListingVisual.tsx';
 import { LiveChatDrawer, type ActiveChatTarget } from './LiveChatDrawer.tsx';
 import { LiveChatPanel } from './LiveChatPanel.tsx';
+import { PaymentDetailsModal, type PaymentReferenceLookup } from './PaymentDetailsModal.tsx';
 import { ProviderOnboardingWizard } from './ProviderOnboardingWizard.tsx';
 import { RealtimeLocationPickerMap } from './ServiceMap.tsx';
 
@@ -87,6 +89,7 @@ interface BusinessPortalViewProps {
   requestedTab?: BusinessPortalTab;
   requestedThreadKey?: string | null;
   navSignal?: number;
+  paymentRefreshSignal?: number;
   onRefreshCatalog: () => void;
   onNotify: (msg: string) => void;
   onEditListing?: (listing: Listing) => void;
@@ -103,6 +106,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   requestedTab,
   requestedThreadKey,
   navSignal = 0,
+  paymentRefreshSignal = 0,
   onRefreshCatalog,
   onNotify,
   onEditListing,
@@ -137,6 +141,10 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     requestedThreadKey ?? null
   );
   const [chatDrawerTarget, setChatDrawerTarget] = useState<ActiveChatTarget | null>(null);
+  const [paymentDetailsModal, setPaymentDetailsModal] = useState<{
+    transaction?: PaymentTransactionRecord | null;
+    lookup?: PaymentReferenceLookup | null;
+  } | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [contractRefreshSignal, setContractRefreshSignal] = useState(0);
   const chatSectionRef = useRef<HTMLDivElement>(null);
@@ -264,6 +272,9 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     onApplicationUpdated: () => {
       loadPortalRef.current();
     },
+    onPaymentSettled: () => {
+      loadPortalRef.current();
+    },
   });
 
   const loadPortalData = async () => {
@@ -362,7 +373,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
 
   useEffect(() => {
     if (firebaseUser) loadPortalData();
-  }, [firebaseUser]);
+  }, [firebaseUser, paymentRefreshSignal]);
 
   useEffect(() => {
     if (firebaseUser && tab === 'APPROVALS' && canApproveProviders) {
@@ -2202,6 +2213,16 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                       {o.customerName} · {o.fulfillmentType} ({o.deliveryAddress}) ·{' '}
                       <strong className="text-[#176B52]">{o.orderStatus}</strong>
                     </p>
+                    <p className="font-mono text-[11px] text-[#172B3A]/75">
+                      Payment: {o.paymentMethod} ·{' '}
+                      <strong
+                        className={
+                          o.paymentStatus === 'SUCCESSFUL' ? 'text-[#176B52]' : 'text-amber-700'
+                        }
+                      >
+                        {o.paymentStatus}
+                      </strong>
+                    </p>
                     <p className="font-mono text-[11px] tabular-nums text-[#172B3A]/70">
                       {o.immediateAcceptance ? 'Immediate Acceptance' : 'Order Request'} · Ready:{' '}
                       {formatEtaClock(o.estimatedReadyAt, o.estimatedReadyMinutes)}
@@ -2297,6 +2318,39 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                     )}
 
                     <div className="flex flex-wrap gap-2">
+                      {(() => {
+                        const matchedPtx = paymentTransactions.find(
+                          (ptx) => ptx.transactionType === 'ORDER' && ptx.referenceId === o.id
+                        );
+                        if (o.paymentStatus !== 'SUCCESSFUL' && !matchedPtx) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPaymentDetailsModal({
+                                transaction: matchedPtx || null,
+                                lookup: matchedPtx
+                                  ? null
+                                  : {
+                                      transactionType: 'ORDER',
+                                      referenceId: o.id,
+                                      referenceCode: o.orderNumber,
+                                      customerName: o.customerName,
+                                      paymentMethod: o.paymentMethod,
+                                      paymentStatus: o.paymentStatus,
+                                      grossAmount: o.totalAmount,
+                                      taxAmount: o.taxAmount,
+                                      createdAt: o.createdAt,
+                                    },
+                              })
+                            }
+                            className="inline-flex min-h-[38px] items-center gap-1.5 rounded border border-[#176B52]/30 bg-emerald-50/70 px-3 py-1 text-[11px] font-semibold text-[#176B52] hover:bg-emerald-100"
+                          >
+                            <Receipt className="h-3.5 w-3.5" />
+                            Payment Details
+                          </button>
+                        );
+                      })()}
                       <button
                         type="button"
                         onClick={() =>
@@ -2401,7 +2455,18 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                         <td className="px-4 py-3 font-mono font-semibold tabular-nums">
                           {formatEtb(o.totalAmount)}
                         </td>
-                        <td className="px-4 py-3 font-semibold text-[#176B52]">{o.orderStatus}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-[#176B52]">{o.orderStatus}</p>
+                          <p
+                            className={`mt-0.5 font-mono text-[10px] font-semibold ${
+                              o.paymentStatus === 'SUCCESSFUL'
+                                ? 'text-[#176B52]'
+                                : 'text-amber-700'
+                            }`}
+                          >
+                            {o.paymentMethod} · {o.paymentStatus}
+                          </p>
+                        </td>
                         <td className="px-4 py-3 text-right">
                           <div className="inline-flex flex-col items-end gap-2">
                             {isPendingRequest && (
@@ -2472,6 +2537,39 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                             )}
 
                             <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                              {(() => {
+                                const matchedPtx = paymentTransactions.find(
+                                  (ptx) => ptx.transactionType === 'ORDER' && ptx.referenceId === o.id
+                                );
+                                if (o.paymentStatus !== 'SUCCESSFUL' && !matchedPtx) return null;
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPaymentDetailsModal({
+                                        transaction: matchedPtx || null,
+                                        lookup: matchedPtx
+                                          ? null
+                                          : {
+                                              transactionType: 'ORDER',
+                                              referenceId: o.id,
+                                              referenceCode: o.orderNumber,
+                                              customerName: o.customerName,
+                                              paymentMethod: o.paymentMethod,
+                                              paymentStatus: o.paymentStatus,
+                                              grossAmount: o.totalAmount,
+                                              taxAmount: o.taxAmount,
+                                              createdAt: o.createdAt,
+                                            },
+                                      })
+                                    }
+                                    className="inline-flex items-center gap-1 rounded border border-[#176B52]/30 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-[#176B52] hover:bg-emerald-100"
+                                  >
+                                    <Receipt className="h-3 w-3" />
+                                    Payment Details
+                                  </button>
+                                );
+                              })()}
                               <button
                                 type="button"
                                 onClick={() =>
@@ -2545,7 +2643,49 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                     {b.scheduledDate} {b.endDate ? `→ ${b.endDate}` : `(${b.scheduledTime})`} ·{' '}
                     <strong>{b.bookingStatus}</strong>
                   </p>
+                  <p className="font-mono text-[11px] text-[#172B3A]/75">
+                    Payment: {b.paymentMethod} ·{' '}
+                    <strong
+                      className={
+                        b.paymentStatus === 'SUCCESSFUL' ? 'text-[#176B52]' : 'text-amber-700'
+                      }
+                    >
+                      {b.paymentStatus}
+                    </strong>
+                  </p>
                   <div className="flex flex-wrap gap-2">
+                    {(() => {
+                      const matchedPtx = paymentTransactions.find(
+                        (ptx) => ptx.transactionType === 'BOOKING' && ptx.referenceId === b.id
+                      );
+                      if (b.paymentStatus !== 'SUCCESSFUL' && !matchedPtx) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPaymentDetailsModal({
+                              transaction: matchedPtx || null,
+                              lookup: matchedPtx
+                                ? null
+                                : {
+                                    transactionType: 'BOOKING',
+                                    referenceId: b.id,
+                                    referenceCode: b.bookingReference,
+                                    customerName: b.customerName,
+                                    paymentMethod: b.paymentMethod,
+                                    paymentStatus: b.paymentStatus,
+                                    grossAmount: b.quotedPrice || b.agreedPrice,
+                                    createdAt: b.createdAt,
+                                  },
+                            })
+                          }
+                          className="inline-flex min-h-[38px] items-center gap-1.5 rounded border border-[#176B52]/30 bg-emerald-50/70 px-3 py-1.5 font-semibold text-[#176B52] hover:bg-emerald-100"
+                        >
+                          <Receipt className="h-3.5 w-3.5" />
+                          Payment Details
+                        </button>
+                      );
+                    })()}
                     <button
                       type="button"
                       onClick={() =>
@@ -2626,9 +2766,50 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                       <td className="px-4 py-3 font-mono font-semibold tabular-nums">
                         {formatEtb(b.agreedPrice)}
                       </td>
-                      <td className="px-4 py-3 font-semibold text-[#176B52]">{b.bookingStatus}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-[#176B52]">{b.bookingStatus}</p>
+                        <p
+                          className={`mt-0.5 font-mono text-[10px] font-semibold ${
+                            b.paymentStatus === 'SUCCESSFUL' ? 'text-[#176B52]' : 'text-amber-700'
+                          }`}
+                        >
+                          {b.paymentMethod} · {b.paymentStatus}
+                        </p>
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                          {(() => {
+                            const matchedPtx = paymentTransactions.find(
+                              (ptx) => ptx.transactionType === 'BOOKING' && ptx.referenceId === b.id
+                            );
+                            if (b.paymentStatus !== 'SUCCESSFUL' && !matchedPtx) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPaymentDetailsModal({
+                                    transaction: matchedPtx || null,
+                                    lookup: matchedPtx
+                                      ? null
+                                      : {
+                                          transactionType: 'BOOKING',
+                                          referenceId: b.id,
+                                          referenceCode: b.bookingReference,
+                                          customerName: b.customerName,
+                                          paymentMethod: b.paymentMethod,
+                                          paymentStatus: b.paymentStatus,
+                                          grossAmount: b.quotedPrice || b.agreedPrice,
+                                          createdAt: b.createdAt,
+                                        },
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 rounded border border-[#176B52]/30 bg-emerald-50/70 px-2.5 py-1 font-semibold text-[#176B52] hover:bg-emerald-100"
+                              >
+                                <Receipt className="h-3 w-3" />
+                                Payment Details
+                              </button>
+                            );
+                          })()}
                           <button
                             type="button"
                             onClick={() =>
@@ -3306,12 +3487,22 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                           Platform Comm: {formatEtb(Number(ptx.commissionAmount))} (
                           {ptx.commissionLegStatus})
                         </p>
+                        <div className="pt-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setPaymentDetailsModal({ transaction: ptx })}
+                            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-white px-3 py-1 text-[11px] font-semibold text-[#176B52] hover:bg-emerald-50"
+                          >
+                            <Receipt className="h-3.5 w-3.5" />
+                            Open Payment Details
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
 
                   <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full min-w-[680px] text-left text-xs">
+                    <table className="w-full min-w-[740px] text-left text-xs">
                       <thead className="border-b border-[#172B3A]/10 bg-[#F4F6F5] text-[#172B3A]/70">
                         <tr>
                           <th className="px-3 py-2.5 font-semibold">Tx Ref &amp; Order</th>
@@ -3322,11 +3513,16 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                           </th>
                           <th className="px-3 py-2.5 font-semibold text-right">Your Net Sales</th>
                           <th className="px-3 py-2.5 font-semibold">Status</th>
+                          <th className="px-3 py-2.5 font-semibold text-right">Receipt</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#172B3A]/10">
                         {paymentTransactions.map((ptx) => (
-                          <tr key={ptx.id}>
+                          <tr
+                            key={ptx.id}
+                            onClick={() => setPaymentDetailsModal({ transaction: ptx })}
+                            className="cursor-pointer transition-colors hover:bg-[#F4F6F5]/70"
+                          >
                             <td className="px-3 py-2.5 font-mono text-[11px]">
                               <p className="font-semibold text-[#172B3A]">{ptx.txRef}</p>
                               <p className="text-[#172B3A]/60">
@@ -3355,6 +3551,19 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                             </td>
                             <td className="px-3 py-2.5 font-mono text-[11px] font-semibold text-[#176B52]">
                               {ptx.status}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPaymentDetailsModal({ transaction: ptx });
+                                }}
+                                className="inline-flex items-center gap-1 rounded border border-[#176B52]/30 bg-emerald-50/70 px-2.5 py-1 text-[11px] font-semibold text-[#176B52] hover:bg-emerald-100"
+                              >
+                                <Receipt className="h-3 w-3" />
+                                Details
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -3397,6 +3606,13 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
         target={chatDrawerTarget}
         onClose={() => setChatDrawerTarget(null)}
         onMessageReceived={() => loadThreadsOnly()}
+      />
+      <PaymentDetailsModal
+        open={Boolean(paymentDetailsModal)}
+        transaction={paymentDetailsModal?.transaction}
+        lookup={paymentDetailsModal?.lookup}
+        viewerRole="RECEIVER"
+        onClose={() => setPaymentDetailsModal(null)}
       />
     </div>
   );

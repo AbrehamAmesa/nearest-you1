@@ -67,6 +67,23 @@ public class PaymentController {
         return paymentGatewayService.getProviderSettlements(principal);
     }
 
+    @GetMapping("/by-tx/{txRef}")
+    public PaymentTransaction getByTxRef(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable String txRef
+    ) {
+        return paymentGatewayService.getPaymentByTxRef(principal, txRef);
+    }
+
+    @GetMapping("/by-reference")
+    public List<PaymentTransaction> getByReference(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam String transactionType,
+            @RequestParam Long referenceId
+    ) {
+        return paymentGatewayService.getPaymentsByReference(principal, transactionType, referenceId);
+    }
+
     @PostMapping("/chapa/webhook")
     public Map<String, Object> chapaWebhook(
             @RequestBody(required = false) String rawBody,

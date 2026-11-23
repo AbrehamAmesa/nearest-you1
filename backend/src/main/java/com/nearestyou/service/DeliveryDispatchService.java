@@ -29,6 +29,7 @@ public class DeliveryDispatchService {
     private final ProviderRegistrationRepository providerRepo;
     private final AuditLogRepository auditLogRepo;
     private final UserAccountRepository userRepo;
+    private final PaymentTransactionRepository paymentRepo;
     private final PaymentGatewayService paymentGatewayService;
     private final LiveChatBroker liveChatBroker;
 
@@ -39,6 +40,7 @@ public class DeliveryDispatchService {
             ProviderRegistrationRepository providerRepo,
             AuditLogRepository auditLogRepo,
             UserAccountRepository userRepo,
+            PaymentTransactionRepository paymentRepo,
             PaymentGatewayService paymentGatewayService,
             LiveChatBroker liveChatBroker
     ) {
@@ -48,6 +50,7 @@ public class DeliveryDispatchService {
         this.providerRepo = providerRepo;
         this.auditLogRepo = auditLogRepo;
         this.userRepo = userRepo;
+        this.paymentRepo = paymentRepo;
         this.paymentGatewayService = paymentGatewayService;
         this.liveChatBroker = liveChatBroker;
     }
@@ -147,6 +150,8 @@ public class DeliveryDispatchService {
         map.put("conflictStatus", d.getConflictStatus());
         map.put("conflictCategory", d.getConflictCategory());
         map.put("conflictResolution", d.getConflictResolution());
+        map.put("paymentMethod", d.getPaymentMethod());
+        map.put("paymentDetails", buildDeliveryPaymentSummary(d, isAdmin || isSender || isDriver));
         map.put("pickupOtp", (isSender || isAdmin) ? d.getPickupOtp() : null);
         map.put("deliveryOtp", (isSender || isAdmin || phoneMatches) ? d.getDeliveryOtp() : null);
         map.put("viewerRole", isAdmin ? "ADMIN" : isSender ? "SENDER" : isDriver ? "DRIVER" : "RECEIVER");
@@ -356,12 +361,25 @@ public class DeliveryDispatchService {
             }
             DeliveryRequest claimed = deliveryRepo.findById(id).orElseThrow();
             userRepo.findByUid(principal.uid()).ifPresent(driverAccount -> {
-                String driverAccLabel = paymentGatewayService.formatAccountSummary(paymentGatewayService.buildDriverPayoutSnapshot(driverAccount));
+                Map<String, Object> driverSnap = paymentGatewayService.buildDriverPayoutSnapshot(driverAccount);
+                String driverAccLabel = paymentGatewayService.formatAccountSummary(driverSnap);
                 commissionRepo.findByTransactionRef(claimed.getTrackingCode()).ifPresent(cr -> {
                     cr.setProviderPayoutAccount(driverAccLabel);
                     cr.setChapaSubaccountId(driverAccount.getChapaSubaccountId());
                     commissionRepo.save(cr);
                 });
+                String txType = claimed.getRequestType() != null ? claimed.getRequestType().toUpperCase(Locale.ROOT) : "DELIVERY";
+                for (PaymentTransaction ptx : paymentRepo.findByTransactionTypeAndReferenceIdOrderByCreatedAtDesc(txType, claimed.getId())) {
+                    ptx.setProviderUid(principal.uid());
+                    ptx.setProviderPayoutAccountSnapshot(driverSnap);
+                    if (driverAccount.getChapaSubaccountId() != null) {
+                        ptx.setChapaSubaccountId(driverAccount.getChapaSubaccountId());
+                    }
+                    if ("PAID".equalsIgnoreCase(ptx.getStatus())) {
+                        ptx.setProviderLegStatus("HELD_ESCROW");
+                    }
+                    paymentRepo.save(ptx);
+                }
             });
             AuditLog log = new AuditLog();
             log.setActorUid(principal.uid());
@@ -406,6 +424,16 @@ public class DeliveryDispatchService {
                 }
                 existing.setDeliveredConfirmedAt(Instant.now());
                 existing.setEscrowStatus("RELEASED");
+                String txType = existing.getRequestType() != null ? existing.getRequestType().toUpperCase(Locale.ROOT) : "DELIVERY";
+                for (PaymentTransaction ptx : paymentRepo.findByTransactionTypeAndReferenceIdOrderByCreatedAtDesc(txType, existing.getId())) {
+                    if ("PAID".equalsIgnoreCase(ptx.getStatus())) {
+                        boolean chapaSub = "CHAPA".equalsIgnoreCase(ptx.getGateway())
+                                && ptx.getChapaSubaccountId() != null && !ptx.getChapaSubaccountId().isBlank()
+                                && !ptx.getChapaSubaccountId().endsWith("-SANDBOX");
+                        ptx.setProviderLegStatus(chapaSub ? "SETTLED_TO_PROVIDER_ACCOUNT" : "RELEASED_PENDING_PAYOUT");
+                        paymentRepo.save(ptx);
+                    }
+                }
             }
             case "CANCELLED" -> {
                 if (!principal.isAdmin()
@@ -534,10 +562,58 @@ public class DeliveryDispatchService {
         map.put("conflictCounterStatement", d.getConflictCounterStatement());
         map.put("conflictResolution", d.getConflictResolution());
         map.put("conflictResolvedAt", d.getConflictResolvedAt());
+        boolean includeSplits = principal != null && (principal.isAdmin()
+                || d.getCustomerUid().equals(principal.uid())
+                || principal.uid().equals(d.getDriverUid()));
+        map.put("paymentDetails", buildDeliveryPaymentSummary(d, includeSplits));
         map.put("distanceToPickupKm", distanceToPickupKm);
         map.put("status", d.getStatus());
         map.put("createdAt", d.getCreatedAt());
         return map;
+    }
+
+    private Map<String, Object> buildDeliveryPaymentSummary(DeliveryRequest d, boolean includeInternalSplits) {
+        String txType = d.getRequestType() != null ? d.getRequestType().toUpperCase(Locale.ROOT) : "DELIVERY";
+        List<PaymentTransaction> txs = paymentRepo.findByTransactionTypeAndReferenceIdOrderByCreatedAtDesc(txType, d.getId());
+        PaymentTransaction ptx = txs.stream()
+                .filter(t -> "PAID".equalsIgnoreCase(t.getStatus()))
+                .findFirst()
+                .orElse(txs.isEmpty() ? null : txs.get(0));
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        String escrow = d.getEscrowStatus() != null ? d.getEscrowStatus().toUpperCase(Locale.ROOT) : "";
+        String computedStatus = ptx != null
+                ? ptx.getStatus()
+                : ("CASH".equalsIgnoreCase(d.getPaymentMethod())
+                        ? "CASH_ON_HANDOVER"
+                        : (("HELD_IN_ESCROW".equals(escrow) || "RELEASED".equals(escrow)) ? "PAID" : "PENDING_PAYMENT"));
+
+        summary.put("txRef", ptx != null ? ptx.getTxRef() : null);
+        summary.put("gateway", ptx != null ? ptx.getGateway() : d.getPaymentMethod());
+        summary.put("gatewayMode", ptx != null ? ptx.getGatewayMode() : null);
+        summary.put("gatewayTransactionId", ptx != null ? ptx.getGatewayTransactionId() : null);
+        summary.put("payerReceiptReference", ptx != null ? ptx.getPayerReceiptReference() : null);
+        summary.put("paymentMethod", d.getPaymentMethod());
+        summary.put("paymentStatus", computedStatus);
+        summary.put("escrowStatus", d.getEscrowStatus());
+        summary.put("currency", ptx != null ? ptx.getCurrency() : d.getCurrency());
+        summary.put("grossAmount", ptx != null ? ptx.getGrossAmount() : d.getTotalFee());
+        summary.put("taxAmount", ptx != null ? ptx.getTaxAmount() : d.getTaxAmount());
+        summary.put("paidAt", ptx != null ? ptx.getPaidAt() : null);
+        summary.put("customerName", d.getCustomerName());
+        summary.put("receiverName", d.getReceiverName());
+        summary.put("referenceCode", d.getTrackingCode());
+        if (includeInternalSplits && ptx != null) {
+            summary.put("commissionAmount", ptx.getCommissionAmount());
+            summary.put("providerAmount", ptx.getProviderAmount());
+            summary.put("commissionLegStatus", ptx.getCommissionLegStatus());
+            summary.put("providerLegStatus", ptx.getProviderLegStatus());
+            summary.put("payerReceiptImageUrl", ptx.getPayerReceiptImageUrl());
+            summary.put("customerEmail", ptx.getCustomerEmail());
+            summary.put("providerPayoutAccountSnapshot", ptx.getProviderPayoutAccountSnapshot());
+            summary.put("platformCommissionAccountSnapshot", ptx.getPlatformCommissionAccountSnapshot());
+        }
+        return summary;
     }
 
     private double haversineKm(double lat1, double lon1, double lat2, double lon2) {

@@ -627,9 +627,7 @@ public class PaymentGatewayService {
     public PaymentTransaction verifyPayment(UserPrincipal principal, String txRef) {
         PaymentTransaction tx = paymentRepo.findByTxRefIgnoreCase(txRef.trim())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Payment transaction not found."));
-        if (!principal.isAdmin()
-                && !principal.uid().equals(tx.getCustomerUid())
-                && !principal.uid().equals(tx.getProviderUid())) {
+        if (!canAccessTransaction(principal, tx)) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied for this payment transaction.");
         }
         if ("PAID".equalsIgnoreCase(tx.getStatus())) {
@@ -670,9 +668,7 @@ public class PaymentGatewayService {
         if (!"PAYO".equalsIgnoreCase(tx.getGateway())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Only PAYO transactions use Payo receipt confirmation.");
         }
-        if (!principal.isAdmin()
-                && !principal.uid().equals(tx.getCustomerUid())
-                && !principal.uid().equals(tx.getProviderUid())) {
+        if (!canAccessTransaction(principal, tx)) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied for this payment transaction.");
         }
         if ("PAID".equalsIgnoreCase(tx.getStatus())) {
@@ -829,6 +825,81 @@ public class PaymentGatewayService {
         return new ArrayList<>(merged.values());
     }
 
+    @Transactional(readOnly = true)
+    public PaymentTransaction getPaymentByTxRef(UserPrincipal principal, String txRef) {
+        PaymentTransaction tx = paymentRepo.findByTxRefIgnoreCase(txRef.trim())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Payment transaction not found."));
+        if (!canAccessTransaction(principal, tx)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied for this payment transaction.");
+        }
+        return tx;
+    }
+
+    @Transactional(readOnly = true)
+    public List<PaymentTransaction> getPaymentsByReference(UserPrincipal principal, String transactionType, Long referenceId) {
+        String txType = transactionType != null ? transactionType.trim().toUpperCase(Locale.ROOT) : "";
+        if (!Set.of("ORDER", "BOOKING", "DELIVERY", "RIDE").contains(txType) || referenceId == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Valid transactionType and referenceId are required.");
+        }
+        List<PaymentTransaction> matches = paymentRepo.findByTransactionTypeAndReferenceIdOrderByCreatedAtDesc(txType, referenceId);
+        if (!matches.isEmpty()) {
+            boolean anyAllowed = matches.stream().anyMatch(tx -> canAccessTransaction(principal, tx));
+            if (!anyAllowed) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied for this payment reference.");
+            }
+            return matches;
+        }
+        // Validate access to the parent record even if no gateway transaction row exists (e.g. COD / Telebirr / CBE Birr)
+        if ("ORDER".equals(txType)) {
+            CustomerOrder order = orderRepo.findById(referenceId)
+                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Order not found."));
+            boolean ownsBiz = businessRepo.findById(order.getBusinessId())
+                    .map(b -> principal.uid().equals(b.getOwnerUid()))
+                    .orElse(false);
+            if (!principal.isAdmin() && !principal.uid().equals(order.getCustomerUid()) && !ownsBiz) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied.");
+            }
+        } else if ("BOOKING".equals(txType)) {
+            Booking booking = bookingRepo.findById(referenceId)
+                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Booking not found."));
+            boolean ownsBiz = businessRepo.findById(booking.getBusinessId())
+                    .map(b -> principal.uid().equals(b.getOwnerUid()))
+                    .orElse(false);
+            if (!principal.isAdmin() && !principal.uid().equals(booking.getCustomerUid()) && !ownsBiz) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied.");
+            }
+        } else {
+            DeliveryRequest delivery = deliveryRepo.findById(referenceId)
+                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Delivery not found."));
+            if (!principal.isAdmin()
+                    && !principal.uid().equals(delivery.getCustomerUid())
+                    && !principal.uid().equals(delivery.getDriverUid())) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "Permission denied.");
+            }
+        }
+        return List.of();
+    }
+
+    private boolean canAccessTransaction(UserPrincipal principal, PaymentTransaction tx) {
+        if (principal == null || tx == null) return false;
+        if (principal.isAdmin()) return true;
+        if (principal.uid().equals(tx.getCustomerUid())) return true;
+        if (tx.getProviderUid() != null && principal.uid().equals(tx.getProviderUid())) return true;
+        if (tx.getBusinessId() != null) {
+            boolean ownsBiz = businessRepo.findById(tx.getBusinessId())
+                    .map(b -> principal.uid().equals(b.getOwnerUid()))
+                    .orElse(false);
+            if (ownsBiz) return true;
+        }
+        if ("DELIVERY".equalsIgnoreCase(tx.getTransactionType()) || "RIDE".equalsIgnoreCase(tx.getTransactionType())) {
+            boolean isDriver = deliveryRepo.findById(tx.getReferenceId())
+                    .map(d -> principal.uid().equals(d.getDriverUid()))
+                    .orElse(false);
+            if (isDriver) return true;
+        }
+        return false;
+    }
+
     private PaymentTransaction markTransactionPaid(PaymentTransaction tx, String actorUid, String auditAction) {
         if ("PAID".equalsIgnoreCase(tx.getStatus())) {
             return tx;
@@ -847,14 +918,16 @@ public class PaymentGatewayService {
                 : (chapaSubaccountSettlement ? "SETTLED_TO_PROVIDER_ACCOUNT" : "PENDING_PROVIDER_PAYOUT"));
         PaymentTransaction saved = paymentRepo.save(tx);
 
+        final String[] resolvedOwnerUid = {saved.getProviderUid()};
         if ("ORDER".equalsIgnoreCase(tx.getTransactionType())) {
             orderRepo.findById(tx.getReferenceId()).ifPresent(order -> {
                 order.setPaymentMethod(tx.getGateway());
                 order.setPaymentStatus("SUCCESSFUL");
                 CustomerOrder savedOrder = orderRepo.save(order);
-                businessRepo.findById(savedOrder.getBusinessId()).ifPresent(biz ->
-                        liveChatBroker.broadcastOrderEvent(savedOrder, biz, actorUid, "PAYMENT_SETTLED")
-                );
+                businessRepo.findById(savedOrder.getBusinessId()).ifPresent(biz -> {
+                    resolvedOwnerUid[0] = biz.getOwnerUid();
+                    liveChatBroker.broadcastOrderEvent(savedOrder, biz, actorUid, "PAYMENT_SETTLED");
+                });
             });
         } else if ("BOOKING".equalsIgnoreCase(tx.getTransactionType())) {
             bookingRepo.findById(tx.getReferenceId()).ifPresent(booking -> {
@@ -866,6 +939,7 @@ public class PaymentGatewayService {
                 }
                 Booking savedBooking = bookingRepo.save(booking);
                 businessRepo.findById(savedBooking.getBusinessId()).ifPresent(biz -> {
+                    resolvedOwnerUid[0] = biz.getOwnerUid();
                     String title = listingRepo.findById(savedBooking.getListingId())
                             .map(ServiceListing::getTitle).orElse(savedBooking.getBookingType());
                     liveChatBroker.broadcastBookingEvent(savedBooking, biz, title, actorUid, "PAYMENT_SETTLED");
@@ -877,12 +951,18 @@ public class PaymentGatewayService {
                 if ("AWAITING_PAYMENT".equalsIgnoreCase(delivery.getEscrowStatus())) {
                     delivery.setEscrowStatus("HELD_IN_ESCROW");
                 }
+                if (delivery.getDriverUid() != null && (saved.getProviderUid() == null || saved.getProviderUid().isBlank())) {
+                    saved.setProviderUid(delivery.getDriverUid());
+                    paymentRepo.save(saved);
+                    resolvedOwnerUid[0] = delivery.getDriverUid();
+                }
                 DeliveryRequest savedDel = deliveryRepo.save(delivery);
                 liveChatBroker.broadcastDeliveryEvent(savedDel, actorUid, "PAYMENT_FUNDED");
             });
         }
 
         updateCommissionSplitMetadata(tx.getReferenceCode(), saved);
+        liveChatBroker.broadcastPaymentSettledEvent(saved, resolvedOwnerUid[0], actorUid);
 
         AuditLog audit = new AuditLog();
         audit.setActorUid(actorUid);

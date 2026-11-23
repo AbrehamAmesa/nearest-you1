@@ -11,10 +11,12 @@ import {
   Navigation,
   Package,
   Radio,
+  Receipt,
   ShieldCheck,
   Truck,
 } from 'lucide-react';
 import type {
+  DeliveryPaymentSummary,
   DeliveryRecord,
   KnownLocationRecord,
   PaymentInitTarget,
@@ -27,12 +29,16 @@ import {
   DeliveryRoutePickerMap,
   type SelectedPlacePoint,
 } from './DeliveryRoutePickerMap.tsx';
+import { PaymentDetailsModal, type PaymentReferenceLookup } from './PaymentDetailsModal.tsx';
 import { LiveDriverTrackerMap } from './ServiceMap.tsx';
 
 interface DeliveryTransportViewProps {
   policy: PlatformPolicy;
   knownLocations?: KnownLocationRecord[];
   language: AppLanguage;
+  requestedMode?: 'CUSTOMER' | 'TRACK' | 'PARTNER';
+  navSignal?: number;
+  paymentRefreshSignal?: number;
   onNotify: (msg: string) => void;
   onOpenPayment?: (target: PaymentInitTarget) => void;
 }
@@ -49,6 +55,9 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
   policy,
   knownLocations: propKnownLocations,
   language,
+  requestedMode,
+  navSignal = 0,
+  paymentRefreshSignal = 0,
   onNotify,
   onOpenPayment,
 }) => {
@@ -147,6 +156,17 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
   const [conflictReason, setConflictReason] = useState('');
   const [counterTarget, setCounterTarget] = useState<DeliveryRecord | null>(null);
   const [counterText, setCounterText] = useState('');
+  const [paymentDetailsModal, setPaymentDetailsModal] = useState<{
+    deliverySummary?: DeliveryPaymentSummary | null;
+    lookup?: PaymentReferenceLookup | null;
+    viewerRole?: 'RECEIVER' | 'PAYER' | 'PARCEL_RECEIVER' | 'ADMIN';
+  } | null>(null);
+
+  useEffect(() => {
+    if (navSignal > 0 && requestedMode) {
+      setMode(requestedMode);
+    }
+  }, [navSignal, requestedMode]);
 
   const driverGpsRef = useRef(driverGps);
   driverGpsRef.current = driverGps;
@@ -215,7 +235,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
     if (firebaseUser) {
       loadQueue();
     }
-  }, [firebaseUser, driverGps?.lat, driverGps?.lng, loadQueue]);
+  }, [firebaseUser, driverGps?.lat, driverGps?.lng, loadQueue, paymentRefreshSignal]);
 
   // Real-time driver location auto-broadcast while Partner is online with active ASSIGNED/PICKED_UP trips
   const activeAssignedDeliveries = useMemo(() => {
@@ -885,6 +905,35 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                             Complete {d.paymentMethod} Payment ({formatEtb(d.totalFee)})
                           </button>
                         )}
+                      {(d.paymentDetails || d.escrowStatus !== 'AWAITING_PAYMENT') && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPaymentDetailsModal({
+                              deliverySummary: d.paymentDetails || null,
+                              lookup: d.paymentDetails
+                                ? null
+                                : {
+                                    transactionType: d.requestType === 'RIDE' ? 'RIDE' : 'DELIVERY',
+                                    referenceId: d.id,
+                                    referenceCode: d.trackingCode,
+                                    customerName: d.customerName,
+                                    paymentMethod: d.paymentMethod,
+                                    paymentStatus: d.escrowStatus,
+                                    grossAmount: d.totalFee,
+                                    taxAmount: d.taxAmount,
+                                    escrowStatus: d.escrowStatus,
+                                    createdAt: d.createdAt,
+                                  },
+                              viewerRole: 'PAYER',
+                            })
+                          }
+                          className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[#172B3A]/15 bg-white px-3 py-1.5 text-xs font-semibold text-[#172B3A] hover:bg-[#F4F6F5]"
+                        >
+                          <Receipt className="h-3.5 w-3.5 text-[#176B52]" />
+                          <span>Payment Details</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -1014,13 +1063,33 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                   </p>
                 </div>
 
-                <div className="min-w-0 text-left sm:text-right font-mono text-xs">
+                <div className="min-w-0 flex flex-col items-start sm:items-end gap-1.5 font-mono text-xs">
                   <p className="font-semibold text-[#176B52]">
                     Escrow: {trackedDelivery.escrowStatus}
                   </p>
                   <p className="break-words text-[#172B3A]/65">
                     Driver: {trackedDelivery.driverName || 'Waiting for nearest <5 km partner'}
                   </p>
+                  {trackedDelivery.paymentDetails && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPaymentDetailsModal({
+                          deliverySummary: trackedDelivery.paymentDetails,
+                          viewerRole:
+                            trackedDelivery.viewerRole === 'RECEIVER'
+                              ? 'PARCEL_RECEIVER'
+                              : trackedDelivery.viewerRole === 'SENDER'
+                                ? 'PAYER'
+                                : 'RECEIVER',
+                        })
+                      }
+                      className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[#176B52]/35 bg-emerald-50 px-3 py-1 font-sans text-xs font-semibold text-[#176B52] hover:bg-emerald-100"
+                    >
+                      <Receipt className="h-3.5 w-3.5" />
+                      Open Payment Details
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1363,6 +1432,35 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                             )}
                         </div>
                       )}
+                      {(d.paymentDetails || d.escrowStatus !== 'AWAITING_PAYMENT') && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPaymentDetailsModal({
+                              deliverySummary: d.paymentDetails || null,
+                              lookup: d.paymentDetails
+                                ? null
+                                : {
+                                    transactionType: d.requestType === 'RIDE' ? 'RIDE' : 'DELIVERY',
+                                    referenceId: d.id,
+                                    referenceCode: d.trackingCode,
+                                    customerName: d.customerName,
+                                    paymentMethod: d.paymentMethod,
+                                    paymentStatus: d.escrowStatus,
+                                    grossAmount: d.totalFee,
+                                    taxAmount: d.taxAmount,
+                                    escrowStatus: d.escrowStatus,
+                                    createdAt: d.createdAt,
+                                  },
+                              viewerRole: 'RECEIVER',
+                            })
+                          }
+                          className="inline-flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-emerald-50/60 px-3 py-2 font-semibold text-[#176B52] hover:bg-emerald-100"
+                        >
+                          <Receipt className="h-3.5 w-3.5" />
+                          Open Payment Details
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1516,6 +1614,36 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                                   )}
                               </div>
                             )}
+                            {(d.paymentDetails || d.escrowStatus !== 'AWAITING_PAYMENT') && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPaymentDetailsModal({
+                                    deliverySummary: d.paymentDetails || null,
+                                    lookup: d.paymentDetails
+                                      ? null
+                                      : {
+                                          transactionType:
+                                            d.requestType === 'RIDE' ? 'RIDE' : 'DELIVERY',
+                                          referenceId: d.id,
+                                          referenceCode: d.trackingCode,
+                                          customerName: d.customerName,
+                                          paymentMethod: d.paymentMethod,
+                                          paymentStatus: d.escrowStatus,
+                                          grossAmount: d.totalFee,
+                                          taxAmount: d.taxAmount,
+                                          escrowStatus: d.escrowStatus,
+                                          createdAt: d.createdAt,
+                                        },
+                                    viewerRole: 'RECEIVER',
+                                  })
+                                }
+                                className="inline-flex min-h-[38px] items-center gap-1 rounded-md border border-[#176B52]/30 bg-emerald-50/60 px-2.5 py-1.5 font-semibold text-[#176B52] hover:bg-emerald-100"
+                              >
+                                <Receipt className="h-3.5 w-3.5" />
+                                Payment Details
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1622,6 +1750,13 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
           </form>
         </div>
       )}
+      <PaymentDetailsModal
+        open={Boolean(paymentDetailsModal)}
+        deliverySummary={paymentDetailsModal?.deliverySummary}
+        lookup={paymentDetailsModal?.lookup}
+        viewerRole={paymentDetailsModal?.viewerRole || 'RECEIVER'}
+        onClose={() => setPaymentDetailsModal(null)}
+      />
     </div>
   );
 };

@@ -12,6 +12,7 @@ import { ListingDetailModal } from './components/ListingDetailModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { AccountProfileModal } from './components/AccountProfileModal.tsx';
 import { JobSeekerAdvertiseModal } from './components/JobSeekerAdvertiseModal.tsx';
+import { PaymentDetailsModal } from './components/PaymentDetailsModal.tsx';
 import { PaymentGatewayModal } from './components/PaymentGatewayModal.tsx';
 import type { AppNotification, NotificationKind } from './components/NotificationCenter.tsx';
 import { useLiveChatInboxListener } from './hooks/useLiveChat.ts';
@@ -30,6 +31,7 @@ import type {
   OnboardingGovernance,
   OrderRecord,
   PaymentInitTarget,
+  PaymentTransactionRecord,
   PlatformPolicy,
   RecommendedListingItem,
   ReviewItem,
@@ -151,6 +153,15 @@ function NearestYouWorkspace() {
     threadKey?: string | null;
     signal: number;
   }>({ signal: 0 });
+  const [deliveryNav, setDeliveryNav] = useState<{
+    mode?: 'CUSTOMER' | 'TRACK' | 'PARTNER';
+    signal: number;
+  }>({ signal: 0 });
+  const [inspectPaymentModal, setInspectPaymentModal] = useState<{
+    transaction?: PaymentTransactionRecord | null;
+    txRef?: string | null;
+    viewerRole?: 'RECEIVER' | 'PAYER' | 'PARCEL_RECEIVER' | 'ADMIN';
+  } | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [documentRequirements, setDocumentRequirements] = useState<CategoryDocumentRequirement[]>(
     []
@@ -318,6 +329,7 @@ function NearestYouWorkspace() {
             actionTarget?: AppSection;
             targetTab?: string;
             threadKey?: string;
+            paymentTxRef?: string;
             onAction?: () => void;
           }
     ) => {
@@ -351,6 +363,7 @@ function NearestYouWorkspace() {
         actionTarget: typeof input !== 'string' ? input.actionTarget : undefined,
         targetTab: typeof input !== 'string' ? input.targetTab : undefined,
         threadKey: typeof input !== 'string' ? input.threadKey : undefined,
+        paymentTxRef: typeof input !== 'string' ? input.paymentTxRef : undefined,
         onAction: typeof input !== 'string' ? input.onAction : undefined,
       };
 
@@ -376,6 +389,15 @@ function NearestYouWorkspace() {
       setAccountOpen(false);
       setJobSeekerModalOpen(false);
       setNotificationsInboxOpen(false);
+
+      if (item.paymentTxRef) {
+        const viewerRole: 'RECEIVER' | 'PAYER' =
+          item.actionTarget === 'activity' ? 'PAYER' : 'RECEIVER';
+        setInspectPaymentModal({
+          txRef: item.paymentTxRef,
+          viewerRole,
+        });
+      }
 
       if (item.actionTarget === 'business') {
         const resolvedTab =
@@ -404,6 +426,21 @@ function NearestYouWorkspace() {
           signal: prev.signal + 1,
         }));
         setActiveSection('activity');
+        return;
+      }
+
+      if (item.actionTarget === 'delivery') {
+        const requestedMode =
+          item.targetTab === 'PARTNER' || item.targetTab === 'DRIVER'
+            ? 'PARTNER'
+            : item.targetTab === 'TRACK'
+              ? 'TRACK'
+              : 'CUSTOMER';
+        setDeliveryNav((prev) => ({
+          mode: requestedMode,
+          signal: prev.signal + 1,
+        }));
+        setActiveSection('delivery');
         return;
       }
 
@@ -740,19 +777,25 @@ function NearestYouWorkspace() {
       .verify(txRef)
       .then((res) => {
         const tx = res.data;
-        pushNotification({
-          eventId: `payment:${tx.txRef}:${tx.status}`,
-          kind: 'offer',
-          title: `Payment ${tx.status} · ${tx.gateway}`,
-          message: `${tx.referenceCode} settled (${Number(tx.grossAmount).toLocaleString()} ETB).`,
-          actionLabel: 'View Activity',
-          actionTarget: 'activity',
-          targetTab: tx.transactionType === 'BOOKING' ? 'BOOKINGS' : tx.transactionType === 'ORDER' ? 'ORDERS' : 'DELIVERIES',
-        });
-        setPaymentRefreshSignal((n) => n + 1);
-      })
-      .catch(() => {});
-  }, [firebaseUser, pushNotification]);
+          pushNotification({
+            eventId: `payment:${tx.txRef}:${tx.status}`,
+            kind: 'offer',
+            title: `Payment ${tx.status} · ${tx.gateway}`,
+            message: `${tx.referenceCode} settled (${Number(tx.grossAmount).toLocaleString()} ETB).`,
+            actionLabel: 'Open Payment Details',
+            actionTarget: 'activity',
+            targetTab:
+              tx.transactionType === 'BOOKING'
+                ? 'BOOKINGS'
+                : tx.transactionType === 'ORDER'
+                  ? 'ORDERS'
+                  : 'DELIVERIES',
+            paymentTxRef: tx.txRef,
+          });
+          setPaymentRefreshSignal((n) => n + 1);
+        })
+        .catch(() => {});
+    }, [firebaseUser, pushNotification]);
 
   useEffect(() => {
     if (!firebaseUser || !dbUser?.uid) return;
@@ -785,6 +828,7 @@ function NearestYouWorkspace() {
             actionTarget,
             targetTab: typeof row.targetTab === 'string' ? row.targetTab : undefined,
             threadKey: typeof row.threadKey === 'string' ? row.threadKey : undefined,
+            paymentTxRef: typeof row.paymentTxRef === 'string' ? row.paymentTxRef : undefined,
           });
         }
       })
@@ -852,6 +896,10 @@ function NearestYouWorkspace() {
       });
     },
     onOrderUpdated: (event) => {
+      if (event.action === 'PAYMENT_SETTLED') {
+        setPaymentRefreshSignal((n) => n + 1);
+        return;
+      }
       if (myUids.size === 0) return;
       if (event.actorUid && myUids.has(event.actorUid)) return;
       const o = event.order;
@@ -900,6 +948,10 @@ function NearestYouWorkspace() {
       }
     },
     onBookingUpdated: (event) => {
+      if (event.action === 'PAYMENT_SETTLED') {
+        setPaymentRefreshSignal((n) => n + 1);
+        return;
+      }
       if (myUids.size === 0) return;
       if (event.actorUid && myUids.has(event.actorUid)) return;
       const b = event.booking;
@@ -1009,6 +1061,52 @@ function NearestYouWorkspace() {
         });
       }
     },
+    onPaymentSettled: (event) => {
+      if (myUids.size === 0) return;
+      const ptx = event.payment;
+      if (!ptx) return;
+      setPaymentRefreshSignal((n) => n + 1);
+
+      const isPayer = Boolean(ptx.customerUid && myUids.has(ptx.customerUid));
+      const isReceiver =
+        Boolean(event.ownerUid && myUids.has(event.ownerUid)) ||
+        Boolean(ptx.providerUid && myUids.has(ptx.providerUid)) ||
+        Boolean(
+          ptx.businessId &&
+            businesses.some((b) => b.id === ptx.businessId && myUids.has(b.ownerUid))
+        );
+      const isDispatch =
+        ptx.transactionType === 'DELIVERY' || ptx.transactionType === 'RIDE';
+
+      if (isReceiver && !isPayer) {
+        pushNotification({
+          eventId: `payment-received:${ptx.txRef}`,
+          kind: 'offer',
+          title: `Payment Received · ${ptx.referenceCode}`,
+          message: `${ptx.customerName || 'Customer'} paid ${Number(ptx.grossAmount).toLocaleString()} ETB via ${ptx.gateway} (Your Net: ${Number(ptx.providerAmount).toLocaleString()} ETB).`,
+          actionLabel: 'Open Payment Details',
+          actionTarget: isDispatch ? 'delivery' : 'business',
+          targetTab: isDispatch ? 'PARTNER' : 'PAYOUTS',
+          paymentTxRef: ptx.txRef,
+        });
+      } else if (isPayer && (!event.actorUid || !myUids.has(event.actorUid))) {
+        pushNotification({
+          eventId: `payment-settled:${ptx.txRef}`,
+          kind: 'offer',
+          title: `Payment Verified · ${ptx.gateway}`,
+          message: `${ptx.referenceCode} paid (${Number(ptx.grossAmount).toLocaleString()} ETB).`,
+          actionLabel: 'Open Payment Details',
+          actionTarget: 'activity',
+          targetTab:
+            ptx.transactionType === 'BOOKING'
+              ? 'BOOKINGS'
+              : ptx.transactionType === 'ORDER'
+                ? 'ORDERS'
+                : 'DELIVERIES',
+          paymentTxRef: ptx.txRef,
+        });
+      }
+    },
   });
 
   const handleOpenJobSeekerAdvertise = () => {
@@ -1101,6 +1199,9 @@ function NearestYouWorkspace() {
             policy={policy}
             knownLocations={knownLocations}
             language={language}
+            requestedMode={deliveryNav.mode}
+            navSignal={deliveryNav.signal}
+            paymentRefreshSignal={paymentRefreshSignal}
             onNotify={notify}
             onOpenPayment={(target) => setPaymentTargets([target])}
           />
@@ -1138,6 +1239,7 @@ function NearestYouWorkspace() {
             requestedTab={businessNav.tab}
             requestedThreadKey={businessNav.threadKey}
             navSignal={businessNav.signal}
+            paymentRefreshSignal={paymentRefreshSignal}
             onRefreshCatalog={() => loadCatalog()}
             onNotify={notify}
             onEditListing={(item) => {
@@ -1343,7 +1445,7 @@ function NearestYouWorkspace() {
             kind: 'offer',
             title: `Payment Verified · ${tx.gateway}`,
             message: `${tx.referenceCode} paid (${Number(tx.grossAmount).toLocaleString()} ETB). Provider sales routed & platform commission collected.`,
-            actionLabel: 'View Activity',
+            actionLabel: 'Open Payment Details',
             actionTarget: 'activity',
             targetTab:
               tx.transactionType === 'BOOKING'
@@ -1351,10 +1453,19 @@ function NearestYouWorkspace() {
                 : tx.transactionType === 'ORDER'
                   ? 'ORDERS'
                   : 'DELIVERIES',
+            paymentTxRef: tx.txRef,
           });
           loadCatalog();
         }}
         onNotify={notify}
+      />
+
+      <PaymentDetailsModal
+        open={Boolean(inspectPaymentModal)}
+        transaction={inspectPaymentModal?.transaction}
+        txRef={inspectPaymentModal?.txRef}
+        viewerRole={inspectPaymentModal?.viewerRole || 'RECEIVER'}
+        onClose={() => setInspectPaymentModal(null)}
       />
     </div>
   );
