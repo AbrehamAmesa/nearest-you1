@@ -1,8 +1,9 @@
-import type { Listing } from '../types/nearestyou.ts';
+import type { Listing, PlatformPolicy } from '../types/nearestyou.ts';
 
 export interface ListingCommercialPolicy {
   isFood: boolean;
   deliveryAvailable: boolean;
+  freeDeliveryMaxKm: number;
   immediateAcceptance: boolean;
   estimatedReadyMinutes: number;
   estimatedDeliveryMinutes: number;
@@ -37,6 +38,7 @@ export function getListingPolicy(listing?: Pick<Listing, 'listingType' | 'metada
   const meta = listing?.metadata || {};
 
   const deliveryAvailable = meta.deliveryAvailable !== false;
+  const freeDeliveryMaxKm = deliveryAvailable ? toPositiveNumber(meta.freeDeliveryMaxKm, 0) : 0;
   const immediateAcceptance = isFood ? false : meta.immediateAcceptance !== false;
   const estimatedReadyMinutes = Math.max(
     5,
@@ -61,6 +63,7 @@ export function getListingPolicy(listing?: Pick<Listing, 'listingType' | 'metada
   return {
     isFood,
     deliveryAvailable,
+    freeDeliveryMaxKm,
     immediateAcceptance,
     estimatedReadyMinutes,
     estimatedDeliveryMinutes,
@@ -71,6 +74,26 @@ export function getListingPolicy(listing?: Pick<Listing, 'listingType' | 'metada
     returnLossFixedEtb,
     deliveryFeeNonRefundableOnReturn,
     returnPolicyNote: meta.returnPolicyNote?.trim() || '',
+  };
+}
+
+export function calculateDeliveryFeeForDistance(
+  distanceKm: number,
+  deliverySupported: boolean,
+  freeDeliveryMaxKm: number,
+  policy: Pick<PlatformPolicy, 'deliveryBaseFee' | 'deliveryPerKmRate'>
+): { coveredByProvider: boolean; feeEtb: number } {
+  if (!deliverySupported) {
+    return { coveredByProvider: false, feeEtb: 0 };
+  }
+  const safeMaxKm = Math.max(0, Number(freeDeliveryMaxKm) || 0);
+  const safeDistance = Math.max(0, Number(distanceKm) || 0);
+  if (safeMaxKm > 0 && safeDistance <= safeMaxKm) {
+    return { coveredByProvider: true, feeEtb: 0 };
+  }
+  return {
+    coveredByProvider: false,
+    feeEtb: Math.round(policy.deliveryBaseFee + safeDistance * policy.deliveryPerKmRate),
   };
 }
 

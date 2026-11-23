@@ -2,7 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
 import type { CartItem, OrderRecord, PlatformPolicy } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
-import { calculateReturnLoss, getListingPolicy } from '../utils/listingPolicy.ts';
+import {
+  calculateDeliveryFeeForDistance,
+  calculateReturnLoss,
+  getListingPolicy,
+} from '../utils/listingPolicy.ts';
 import { getPublicProviderLabel } from '../utils/sellerDisplay.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -59,7 +63,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         subtotal: number;
         discountSavings: number;
         deliverySupported: boolean;
+        freeDeliveryMaxKm: number;
         effectiveFulfillment: 'DELIVERY' | 'PICKUP';
+        deliveryCoveredByProvider: boolean;
         deliveryFee: number;
         taxAmount: number;
         total: number;
@@ -100,7 +106,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           subtotal: lineSub,
           discountSavings: lineSavings,
           deliverySupported: itemPol.deliveryAvailable,
+          freeDeliveryMaxKm: itemPol.deliveryAvailable ? itemPol.freeDeliveryMaxKm : 0,
           effectiveFulfillment: 'PICKUP',
+          deliveryCoveredByProvider: false,
           deliveryFee: 0,
           taxAmount: 0,
           total: 0,
@@ -121,6 +129,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         existing.subtotal += lineSub;
         existing.discountSavings += lineSavings;
         existing.deliverySupported = existing.deliverySupported && itemPol.deliveryAvailable;
+        existing.freeDeliveryMaxKm = existing.deliverySupported
+          ? Math.min(existing.freeDeliveryMaxKm, itemPol.freeDeliveryMaxKm)
+          : 0;
         existing.isFoodOrder = existing.isFoodOrder || itemPol.isFood;
         existing.immediateAcceptance =
           !existing.isFoodOrder && existing.immediateAcceptance && itemPol.immediateAcceptance;
@@ -156,14 +167,25 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     return Array.from(map.values()).map((g) => {
       const effectiveFulfillment: 'DELIVERY' | 'PICKUP' =
         fulfillmentType === 'DELIVERY' && g.deliverySupported ? 'DELIVERY' : 'PICKUP';
-      const deliveryFee =
-        effectiveFulfillment === 'DELIVERY'
-          ? Math.round(policy.deliveryBaseFee + g.distanceKm * policy.deliveryPerKmRate)
-          : 0;
+      const delivCalc = calculateDeliveryFeeForDistance(
+        g.distanceKm,
+        effectiveFulfillment === 'DELIVERY',
+        g.freeDeliveryMaxKm,
+        policy
+      );
+      const deliveryFee = delivCalc.feeEtb;
       const taxAmount = Math.round(g.subtotal * (policy.taxRatePercent / 100) * 100) / 100;
       const total = Math.round((g.subtotal + deliveryFee + taxAmount) * 100) / 100;
       const returnLoss = calculateReturnLoss(g.subtotal, deliveryFee, g.returnPolicy, 1);
-      return { ...g, effectiveFulfillment, deliveryFee, taxAmount, total, returnLoss };
+      return {
+        ...g,
+        effectiveFulfillment,
+        deliveryCoveredByProvider: delivCalc.coveredByProvider,
+        deliveryFee,
+        taxAmount,
+        total,
+        returnLoss,
+      };
     });
   }, [items, userLat, userLng, fulfillmentType, policy]);
 
@@ -196,6 +218,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               ? `Pickup at ${g.business.landmark}, ${g.business.subCity}`
               : deliveryAddress,
           deliveryFee: g.deliveryFee,
+          distanceKm: g.distanceKm,
           items: g.items.map((i) => ({
             listingId: i.listing.id,
             quantity: i.quantity,
@@ -390,11 +413,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         <span>
                           Delivery (
                           {group.effectiveFulfillment === 'DELIVERY'
-                            ? `${group.distanceKm} km`
+                            ? group.deliveryCoveredByProvider
+                              ? `${group.distanceKm} km · Provider covered (0–${group.freeDeliveryMaxKm} km)`
+                              : group.freeDeliveryMaxKm > 0
+                                ? `${group.distanceKm} km · Beyond ${group.freeDeliveryMaxKm} km (buyer pays)`
+                                : `${group.distanceKm} km`
                             : 'Store Pickup'}
                           )
                         </span>
-                        <span className="font-mono tabular-nums">{formatEtb(group.deliveryFee)}</span>
+                        <span className="font-mono tabular-nums">
+                          {group.deliveryCoveredByProvider ? 'FREE (0 ETB)' : formatEtb(group.deliveryFee)}
+                        </span>
                       </div>
                       <div className="flex justify-between text-[#172B3A]/70">
                         <span>VAT ({policy.taxRatePercent}%)</span>

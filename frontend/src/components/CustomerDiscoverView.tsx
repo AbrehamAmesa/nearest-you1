@@ -919,7 +919,12 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                         const pol = getListingPolicy(listing);
                         return (
                           <p className="mt-0.5 truncate text-[10px] text-[#172B3A]/65">
-                            {pol.deliveryAvailable ? `With Delivery ~${pol.estimatedDeliveryMinutes}m` : 'Pickup Only'} ·{' '}
+                            {pol.deliveryAvailable
+                              ? `With Delivery ~${pol.estimatedDeliveryMinutes}m${
+                                  pol.freeDeliveryMaxKm > 0 ? ` (Free 0–${pol.freeDeliveryMaxKm} km)` : ''
+                                }`
+                              : 'Pickup Only'}{' '}
+                            ·{' '}
                             {pol.isFood ? 'Order Request' : pol.immediateAcceptance ? 'Instant Accept' : 'Seller Accept'} ·{' '}
                             {pol.returnable
                               ? pol.returnLossPercent > 0 || pol.returnLossFixedEtb > 0
@@ -1497,7 +1502,11 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                                 <p className="mt-1 line-clamp-2 text-[11px] text-[#172B3A]/70">
                                   <span className="font-semibold text-[#176B52]">
                                     {pol.deliveryAvailable
-                                      ? `With Delivery (~${pol.estimatedDeliveryMinutes} min)`
+                                      ? `With Delivery (~${pol.estimatedDeliveryMinutes} min${
+                                          pol.freeDeliveryMaxKm > 0
+                                            ? ` · Free 0–${pol.freeDeliveryMaxKm} km`
+                                            : ''
+                                        })`
                                       : 'Without Delivery (Pickup Only)'}
                                   </span>
                                   {' · '}

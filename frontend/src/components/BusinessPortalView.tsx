@@ -194,6 +194,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   const [cvFileName, setCvFileName] = useState('');
   const [introVideoUrl, setIntroVideoUrl] = useState('');
   const [deliveryAvailable, setDeliveryAvailable] = useState(true);
+  const [freeDeliveryMaxKm, setFreeDeliveryMaxKm] = useState('0');
   const [immediateAcceptance, setImmediateAcceptance] = useState(true);
   const [estimatedReadyMinutes, setEstimatedReadyMinutes] = useState('15');
   const [estimatedDeliveryMinutes, setEstimatedDeliveryMinutes] = useState('45');
@@ -612,6 +613,9 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
       const readyMin = Math.max(5, Math.round(Number(estimatedReadyMinutes) || 15));
       const delivMin = Math.max(readyMin, Math.round(Number(estimatedDeliveryMinutes) || 45));
       metadataPayload.deliveryAvailable = deliveryAvailable;
+      metadataPayload.freeDeliveryMaxKm = deliveryAvailable
+        ? Math.max(0, Number(freeDeliveryMaxKm) || 0)
+        : 0;
       metadataPayload.immediateAcceptance =
         listingType === 'FOOD' ? false : immediateAcceptance;
       metadataPayload.estimatedReadyMinutes = readyMin;
@@ -692,6 +696,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     setCvUrl('');
     setCvFileName('');
     setIntroVideoUrl('');
+    setFreeDeliveryMaxKm('0');
     setReturnPolicyNote('');
     onRefreshCatalog();
   };
@@ -1900,6 +1905,32 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                   </div>
                 </div>
 
+                {deliveryAvailable && (
+                  <div className="rounded-lg border border-[#176B52]/20 bg-white p-2.5">
+                    <label className="block text-[11px] font-semibold text-[#172B3A]">
+                      Provider-Covered Delivery Radius (0 to X km)
+                    </label>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className="font-mono text-[11px] text-[#172B3A]/70">0 km →</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.5"
+                        value={freeDeliveryMaxKm}
+                        onChange={(e) => setFreeDeliveryMaxKm(e.target.value)}
+                        placeholder="0"
+                        className="h-9 w-28 rounded-lg border border-[#172B3A]/15 bg-[#F4F6F5]/40 px-2.5 font-mono text-xs"
+                      />
+                      <span className="font-mono text-[11px] text-[#172B3A]/70">km</span>
+                    </div>
+                    <p className="mt-1 text-[10px] text-[#172B3A]/65">
+                      {Number(freeDeliveryMaxKm) > 0
+                        ? `0 to ${Number(freeDeliveryMaxKm)} km delivery is covered by you (0 ETB for buyer). Beyond ${Number(freeDeliveryMaxKm)} km, buyer pays distance delivery.`
+                        : 'Set X > 0 to cover delivery from 0 to X km; when 0, buyer pays distance delivery (no extra delivery fee needed).'}
+                    </p>
+                  </div>
+                )}
+
                 <div className="space-y-2 border-t border-[#172B3A]/10 pt-2">
                   <label className="block text-[11px] font-medium text-[#172B3A]/75">
                     Unsatisfied Buyer Return Policy
@@ -1976,7 +2007,8 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
 
                   {(() => {
                     const sampleItem = Number(discountPrice || basePrice) || 0;
-                    const sampleDeliv = deliveryAvailable ? 120 : 0;
+                    const freeKm = deliveryAvailable ? Math.max(0, Number(freeDeliveryMaxKm) || 0) : 0;
+                    const sampleDeliv = deliveryAvailable && freeKm === 0 ? 120 : 0;
                     const loss = calculateReturnLoss(sampleItem, sampleDeliv, {
                       returnable,
                       returnLossPercent: Number(returnLossPercent) || 0,
@@ -1986,8 +2018,11 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                     });
                     return (
                       <p className="rounded bg-white px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-[#172B3A]/80 border border-[#172B3A]/10">
-                        Sample return loss (1 unit @ {formatEtb(sampleItem)} + {formatEtb(sampleDeliv)} delivery):
-                        Buyer loses {formatEtb(loss.totalLossEtb)} · Refund {formatEtb(loss.refundEtb)}
+                        Sample return loss (1 unit @ {formatEtb(sampleItem)}
+                        {freeKm > 0
+                          ? ` + 0 ETB delivery within 0–${freeKm} km`
+                          : ` + ${formatEtb(sampleDeliv)} delivery`}
+                        ): Buyer loses {formatEtb(loss.totalLossEtb)} · Refund {formatEtb(loss.refundEtb)}
                       </p>
                     );
                   })()}

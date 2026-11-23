@@ -126,6 +126,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const [editCvFileName, setEditCvFileName] = useState('');
   const [editCompanyLogoUrl, setEditCompanyLogoUrl] = useState('');
   const [editDeliveryAvailable, setEditDeliveryAvailable] = useState(true);
+  const [editFreeDeliveryMaxKm, setEditFreeDeliveryMaxKm] = useState('0');
   const [editImmediateAcceptance, setEditImmediateAcceptance] = useState(true);
   const [editEstimatedReadyMinutes, setEditEstimatedReadyMinutes] = useState('15');
   const [editEstimatedDeliveryMinutes, setEditEstimatedDeliveryMinutes] = useState('45');
@@ -172,6 +173,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
     setEditCvFileName(listing.metadata?.cvFileName || '');
     setEditCompanyLogoUrl(listing.metadata?.companyLogoUrl || '');
     setEditDeliveryAvailable(pol.deliveryAvailable);
+    setEditFreeDeliveryMaxKm(String(pol.freeDeliveryMaxKm || 0));
     setEditImmediateAcceptance(pol.immediateAcceptance);
     setEditEstimatedReadyMinutes(String(pol.estimatedReadyMinutes));
     setEditEstimatedDeliveryMinutes(String(pol.estimatedDeliveryMinutes));
@@ -461,6 +463,9 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
       const readyMin = Math.max(5, Math.round(Number(editEstimatedReadyMinutes) || 15));
       const delivMin = Math.max(readyMin, Math.round(Number(editEstimatedDeliveryMinutes) || 45));
       safeMeta.deliveryAvailable = editDeliveryAvailable;
+      safeMeta.freeDeliveryMaxKm = editDeliveryAvailable
+        ? Math.max(0, Number(editFreeDeliveryMaxKm) || 0)
+        : 0;
       safeMeta.immediateAcceptance =
         listing.listingType === 'FOOD' ? false : editImmediateAcceptance;
       safeMeta.estimatedReadyMinutes = readyMin;
@@ -1254,6 +1259,31 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                           </div>
                         </div>
 
+                        {editDeliveryAvailable && (
+                          <div className="rounded-lg border border-[#176B52]/20 bg-[#F4F6F5]/60 p-2.5">
+                            <label className="block text-[11px] font-semibold text-[#172B3A]">
+                              Provider-Covered Delivery Radius (0 to X km)
+                            </label>
+                            <div className="mt-1 flex items-center gap-2">
+                              <span className="font-mono text-[11px] text-[#172B3A]/70">0 km →</span>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.5"
+                                value={editFreeDeliveryMaxKm}
+                                onChange={(e) => setEditFreeDeliveryMaxKm(e.target.value)}
+                                className="h-9 w-28 rounded-lg border border-[#172B3A]/15 bg-white px-2.5 font-mono text-xs"
+                              />
+                              <span className="font-mono text-[11px] text-[#172B3A]/70">km</span>
+                            </div>
+                            <p className="mt-1 text-[10px] text-[#172B3A]/65">
+                              {Number(editFreeDeliveryMaxKm) > 0
+                                ? `0 to ${Number(editFreeDeliveryMaxKm)} km delivery is from you (0 ETB for buyer); beyond ${Number(editFreeDeliveryMaxKm)} km buyer pays.`
+                                : 'When 0 km, buyer pays distance delivery (no extra flat fee needed).'}
+                            </p>
+                          </div>
+                        )}
+
                         <div className="space-y-2 border-t border-[#172B3A]/10 pt-2.5">
                           <label className="block text-[11px] font-medium text-[#172B3A]/75">
                             If Buyer Is Unsatisfied (Returnability)
@@ -1330,7 +1360,10 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
 
                           {(() => {
                             const sampleItem = Number(editDiscountPrice || editBasePrice) || 0;
-                            const sampleDeliv = editDeliveryAvailable ? 120 : 0;
+                            const freeKm = editDeliveryAvailable
+                              ? Math.max(0, Number(editFreeDeliveryMaxKm) || 0)
+                              : 0;
+                            const sampleDeliv = editDeliveryAvailable && freeKm === 0 ? 120 : 0;
                             const loss = calculateReturnLoss(sampleItem, sampleDeliv, {
                               returnable: editReturnable,
                               returnLossPercent: Number(editReturnLossPercent) || 0,
@@ -1340,8 +1373,12 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                             });
                             return (
                               <p className="rounded bg-[#F4F6F5] px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-[#172B3A]/80">
-                                Preview (1 unit @ {formatEtb(sampleItem)} + {formatEtb(sampleDeliv)} delivery):
-                                Buyer loses {formatEtb(loss.totalLossEtb)} · Refund {formatEtb(loss.refundEtb)}
+                                Preview (1 unit @ {formatEtb(sampleItem)}
+                                {freeKm > 0
+                                  ? ` + 0 ETB delivery within 0–${freeKm} km`
+                                  : ` + ${formatEtb(sampleDeliv)} delivery`}
+                                ): Buyer loses {formatEtb(loss.totalLossEtb)} · Refund{' '}
+                                {formatEtb(loss.refundEtb)}
                               </p>
                             );
                           })()}
@@ -1456,7 +1493,11 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                               <span className="text-[#172B3A]/65">Delivery</span>
                               <span className="font-semibold text-[#172B3A]">
                                 {pol.deliveryAvailable
-                                  ? `With Delivery (~${pol.estimatedDeliveryMinutes} min)`
+                                  ? `With Delivery (~${pol.estimatedDeliveryMinutes} min${
+                                      pol.freeDeliveryMaxKm > 0
+                                        ? ` · Free 0–${pol.freeDeliveryMaxKm} km`
+                                        : ' · Buyer pays delivery'
+                                    })`
                                   : 'Without Delivery (Pickup Only)'}
                               </span>
                             </div>
@@ -1496,7 +1537,8 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                       {(() => {
                         const pol = getListingPolicy(listing);
                         const itemPrice = Number(listing.discountPrice || listing.basePrice) || 0;
-                        const sampleDeliveryFee = pol.deliveryAvailable ? 120 : 0;
+                        const sampleDeliveryFee =
+                          pol.deliveryAvailable && pol.freeDeliveryMaxKm === 0 ? 120 : 0;
                         const loss = calculateReturnLoss(itemPrice, sampleDeliveryFee, pol, 1);
                         return (
                           <div className="space-y-2 rounded-xl border border-[#172B3A]/12 bg-white p-3.5 text-xs">
@@ -1507,7 +1549,11 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                               <p>
                                 <strong className="text-[#172B3A]">Delivery:</strong>{' '}
                                 {pol.deliveryAvailable
-                                  ? `With Delivery · Ready in ~${pol.estimatedReadyMinutes} min · Deliverable in ~${pol.estimatedDeliveryMinutes} min`
+                                  ? `With Delivery · Ready in ~${pol.estimatedReadyMinutes} min · Deliverable in ~${pol.estimatedDeliveryMinutes} min · ${
+                                      pol.freeDeliveryMaxKm > 0
+                                        ? `Free from 0–${pol.freeDeliveryMaxKm} km (covered by provider); buyer pays beyond ${pol.freeDeliveryMaxKm} km`
+                                        : 'Buyer pays distance delivery fee'
+                                    }`
                                   : `Without Delivery (Store Pickup Only at ${business.landmark}, ${business.subCity}) · Ready in ~${pol.estimatedReadyMinutes} min`}
                               </p>
                               <p>
@@ -1532,7 +1578,12 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                               </p>
                               <p className="font-mono text-[11px] tabular-nums text-[#176B52]">
                                 Sample buyer loss (1 unit @ {formatEtb(itemPrice)}
-                                {pol.deliveryAvailable ? ` + ${formatEtb(sampleDeliveryFee)} est. delivery` : ''}):{' '}
+                                {pol.deliveryAvailable
+                                  ? pol.freeDeliveryMaxKm > 0
+                                    ? ` + 0 ETB delivery within 0–${pol.freeDeliveryMaxKm} km`
+                                    : ` + ${formatEtb(sampleDeliveryFee)} est. delivery`
+                                  : ''}
+                                ):{' '}
                                 <strong>{formatEtb(loss.totalLossEtb)} lost</strong> (Refund:{' '}
                                 <strong>{formatEtb(loss.refundEtb)}</strong>)
                               </p>

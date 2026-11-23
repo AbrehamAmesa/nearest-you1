@@ -147,6 +147,7 @@ public final class NearestYouDtos {
         @NotBlank String fulfillmentType,
         @NotBlank String deliveryAddress,
         BigDecimal deliveryFee,
+        BigDecimal distanceKm,
         @NotEmpty List<OrderItemInput> items
     ) {}
 

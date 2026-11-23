@@ -385,6 +385,9 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
                       <div className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/70 p-3.5">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-[#172B3A]/60">
                           Platform Commission
+                          {activeTx?.commissionRate != null
+                            ? ` (${Number(activeTx.commissionRate).toFixed(2)}%)`
+                            : ''}
                         </p>
                         <p className="mt-1 font-mono text-base font-bold tabular-nums text-[#172B3A]">
                           {formatEtb(commissionAmount!)}

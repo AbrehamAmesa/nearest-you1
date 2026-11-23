@@ -64,6 +64,7 @@ public class PaymentGatewayService {
     private final UserAccountRepository userRepo;
     private final CommissionRecordRepository commissionRepo;
     private final PlatformSettingRepository settingRepo;
+    private final ServiceCategoryRepository categoryRepo;
     private final ServiceListingRepository listingRepo;
     private final AuditLogRepository auditLogRepo;
     private final LiveChatBroker liveChatBroker;
@@ -110,6 +111,7 @@ public class PaymentGatewayService {
             UserAccountRepository userRepo,
             CommissionRecordRepository commissionRepo,
             PlatformSettingRepository settingRepo,
+            ServiceCategoryRepository categoryRepo,
             ServiceListingRepository listingRepo,
             AuditLogRepository auditLogRepo,
             LiveChatBroker liveChatBroker
@@ -122,6 +124,7 @@ public class PaymentGatewayService {
         this.userRepo = userRepo;
         this.commissionRepo = commissionRepo;
         this.settingRepo = settingRepo;
+        this.categoryRepo = categoryRepo;
         this.listingRepo = listingRepo;
         this.auditLogRepo = auditLogRepo;
         this.liveChatBroker = liveChatBroker;
@@ -260,7 +263,16 @@ public class PaymentGatewayService {
         return out;
     }
 
-    private BigDecimal resolveDefaultCommissionFraction() {
+    private BigDecimal clampCommissionPercent(BigDecimal rawPct) {
+        if (rawPct == null) return new BigDecimal("10.00");
+        double val = rawPct.doubleValue();
+        if (Double.isNaN(val) || val < 0.0 || val > 50.0) {
+            return new BigDecimal("10.00");
+        }
+        return rawPct.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal resolveDefaultCommissionPercent() {
         Map<String, Object> policy = settingRepo.findBySettingKey("pricing_policy")
                 .map(PlatformSetting::getSettingValue)
                 .orElse(Map.of());
@@ -276,7 +288,26 @@ public class PaymentGatewayService {
             }
         }
         if (pct < 0 || pct > 50) pct = 10.0;
-        return BigDecimal.valueOf(pct).divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
+        return BigDecimal.valueOf(pct).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal resolveCommissionPercentForCategory(Long categoryId) {
+        if (categoryId != null) {
+            Optional<ServiceCategory> catOpt = categoryRepo.findById(categoryId);
+            if (catOpt.isPresent() && catOpt.get().getCommissionRate() != null) {
+                return clampCommissionPercent(catOpt.get().getCommissionRate());
+            }
+        }
+        return resolveDefaultCommissionPercent();
+    }
+
+    private BigDecimal toSplitFraction(BigDecimal commissionPercent) {
+        return clampCommissionPercent(commissionPercent)
+                .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal resolveDefaultCommissionFraction() {
+        return toSplitFraction(resolveDefaultCommissionPercent());
     }
 
     @Transactional
@@ -330,13 +361,15 @@ public class PaymentGatewayService {
         biz.setPayoAccountHandle(trimOrNull(req.payoAccountHandle()));
         biz.setPreferredPayoutGateway(normalizePreferredGateway(req.preferredPayoutGateway()));
 
+        BigDecimal splitFraction = toSplitFraction(resolveCommissionPercentForCategory(biz.getCategoryId()));
         String subId = provisionChapaSubaccountIfPossible(
                 biz.getBusinessName(),
                 accountName != null ? accountName : biz.getBusinessName(),
                 bankCode,
                 accountNumber,
                 "SUB-NY-BIZ-" + biz.getId(),
-                biz.getChapaSubaccountId()
+                biz.getChapaSubaccountId(),
+                splitFraction
         );
         biz.setChapaSubaccountId(subId);
 
@@ -374,13 +407,15 @@ public class PaymentGatewayService {
         user.setPayoAccountHandle(trimOrNull(req.payoAccountHandle()));
         user.setPreferredPayoutGateway(normalizePreferredGateway(req.preferredPayoutGateway()));
 
+        BigDecimal splitFraction = resolveDefaultCommissionFraction();
         String subId = provisionChapaSubaccountIfPossible(
                 user.getFullName(),
                 accountName != null ? accountName : user.getFullName(),
                 bankCode,
                 accountNumber,
                 "SUB-NY-USR-" + user.getId(),
-                user.getChapaSubaccountId()
+                user.getChapaSubaccountId(),
+                splitFraction
         );
         user.setChapaSubaccountId(subId);
 
@@ -426,6 +461,7 @@ public class PaymentGatewayService {
         String providerUid = null;
         Long businessId = null;
         BigDecimal grossAmount;
+        BigDecimal commissionRatePercent;
         BigDecimal commissionAmount;
         BigDecimal providerAmount;
         BigDecimal taxAmount;
@@ -453,23 +489,25 @@ public class PaymentGatewayService {
             taxAmount = order.getTaxAmount();
 
             CommissionRecord cr = commissionRepo.findByTransactionRef(referenceCode).orElse(null);
-            BigDecimal defaultRate = resolveDefaultCommissionFraction();
-            commissionAmount = cr != null && cr.getCommissionAmount() != null
-                    ? cr.getCommissionAmount()
-                    : grossAmount.multiply(defaultRate).setScale(2, RoundingMode.HALF_UP);
-            providerAmount = cr != null && cr.getProviderAmount() != null
-                    ? cr.getProviderAmount()
-                    : grossAmount.subtract(commissionAmount).setScale(2, RoundingMode.HALF_UP);
+            commissionRatePercent = (cr != null && cr.getCommissionRate() != null)
+                    ? clampCommissionPercent(cr.getCommissionRate())
+                    : resolveCommissionPercentForCategory(biz.getCategoryId());
+            BigDecimal splitFraction = toSplitFraction(commissionRatePercent);
+            commissionAmount = grossAmount.multiply(splitFraction).setScale(2, RoundingMode.HALF_UP);
+            providerAmount = grossAmount.subtract(commissionAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
 
-            if (biz.getPayoutAccountNumber() != null && !biz.getPayoutAccountNumber().isBlank()
-                    && (biz.getChapaSubaccountId() == null || biz.getChapaSubaccountId().isBlank())) {
+            boolean needsBizProvision = biz.getPayoutAccountNumber() != null && !biz.getPayoutAccountNumber().isBlank()
+                    && (biz.getChapaSubaccountId() == null || biz.getChapaSubaccountId().isBlank()
+                    || (isChapaLiveConfigured() && biz.getChapaSubaccountId().endsWith("-SANDBOX")));
+            if (needsBizProvision) {
                 String provisioned = provisionChapaSubaccountIfPossible(
                         biz.getBusinessName(),
                         biz.getPayoutAccountName() != null ? biz.getPayoutAccountName() : biz.getBusinessName(),
                         biz.getPayoutBankCode(),
                         biz.getPayoutAccountNumber(),
                         "SUB-NY-BIZ-" + biz.getId(),
-                        null
+                        biz.getChapaSubaccountId(),
+                        splitFraction
                 );
                 if (provisioned != null) {
                     biz.setChapaSubaccountId(provisioned);
@@ -511,15 +549,36 @@ public class PaymentGatewayService {
             }
             grossAmount = booking.getAgreedPrice();
 
+            Long categoryId = listingRepo.findById(booking.getListingId())
+                    .map(ServiceListing::getCategoryId)
+                    .orElse(biz.getCategoryId());
             CommissionRecord cr = commissionRepo.findByTransactionRef(referenceCode).orElse(null);
-            BigDecimal defaultRate = resolveDefaultCommissionFraction();
-            commissionAmount = cr != null && cr.getCommissionAmount() != null
-                    ? cr.getCommissionAmount()
-                    : grossAmount.multiply(defaultRate).setScale(2, RoundingMode.HALF_UP);
-            providerAmount = cr != null && cr.getProviderAmount() != null
-                    ? cr.getProviderAmount()
-                    : grossAmount.subtract(commissionAmount).setScale(2, RoundingMode.HALF_UP);
+            commissionRatePercent = (cr != null && cr.getCommissionRate() != null)
+                    ? clampCommissionPercent(cr.getCommissionRate())
+                    : resolveCommissionPercentForCategory(categoryId);
+            BigDecimal splitFraction = toSplitFraction(commissionRatePercent);
+            commissionAmount = grossAmount.multiply(splitFraction).setScale(2, RoundingMode.HALF_UP);
+            providerAmount = grossAmount.subtract(commissionAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
             taxAmount = cr != null && cr.getVatAmount() != null ? cr.getVatAmount() : BigDecimal.ZERO;
+
+            boolean needsBizProvision = biz.getPayoutAccountNumber() != null && !biz.getPayoutAccountNumber().isBlank()
+                    && (biz.getChapaSubaccountId() == null || biz.getChapaSubaccountId().isBlank()
+                    || (isChapaLiveConfigured() && biz.getChapaSubaccountId().endsWith("-SANDBOX")));
+            if (needsBizProvision) {
+                String provisioned = provisionChapaSubaccountIfPossible(
+                        biz.getBusinessName(),
+                        biz.getPayoutAccountName() != null ? biz.getPayoutAccountName() : biz.getBusinessName(),
+                        biz.getPayoutBankCode(),
+                        biz.getPayoutAccountNumber(),
+                        "SUB-NY-BIZ-" + biz.getId(),
+                        biz.getChapaSubaccountId(),
+                        splitFraction
+                );
+                if (provisioned != null) {
+                    biz.setChapaSubaccountId(provisioned);
+                    businessRepo.save(biz);
+                }
+            }
 
             UserAccount ownerUser = userRepo.findByUid(biz.getOwnerUid()).orElse(null);
             chapaSubaccountId = biz.getChapaSubaccountId() != null ? biz.getChapaSubaccountId()
@@ -549,15 +608,31 @@ public class PaymentGatewayService {
             taxAmount = delivery.getTaxAmount();
 
             CommissionRecord cr = commissionRepo.findByTransactionRef(referenceCode).orElse(null);
-            BigDecimal defaultRate = resolveDefaultCommissionFraction();
-            commissionAmount = cr != null && cr.getCommissionAmount() != null
-                    ? cr.getCommissionAmount()
-                    : grossAmount.multiply(defaultRate).setScale(2, RoundingMode.HALF_UP);
-            providerAmount = cr != null && cr.getProviderAmount() != null
-                    ? cr.getProviderAmount()
-                    : grossAmount.subtract(commissionAmount).subtract(taxAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+            commissionRatePercent = (cr != null && cr.getCommissionRate() != null)
+                    ? clampCommissionPercent(cr.getCommissionRate())
+                    : resolveDefaultCommissionPercent();
+            BigDecimal splitFraction = toSplitFraction(commissionRatePercent);
+            commissionAmount = grossAmount.multiply(splitFraction).setScale(2, RoundingMode.HALF_UP);
+            providerAmount = grossAmount.subtract(commissionAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
 
             UserAccount driverUser = providerUid != null ? userRepo.findByUid(providerUid).orElse(null) : null;
+            if (driverUser != null && driverUser.getPayoutAccountNumber() != null && !driverUser.getPayoutAccountNumber().isBlank()
+                    && (driverUser.getChapaSubaccountId() == null || driverUser.getChapaSubaccountId().isBlank()
+                    || (isChapaLiveConfigured() && driverUser.getChapaSubaccountId().endsWith("-SANDBOX")))) {
+                String provisioned = provisionChapaSubaccountIfPossible(
+                        driverUser.getFullName(),
+                        driverUser.getPayoutAccountName() != null ? driverUser.getPayoutAccountName() : driverUser.getFullName(),
+                        driverUser.getPayoutBankCode(),
+                        driverUser.getPayoutAccountNumber(),
+                        "SUB-NY-USR-" + driverUser.getId(),
+                        driverUser.getChapaSubaccountId(),
+                        splitFraction
+                );
+                if (provisioned != null) {
+                    driverUser.setChapaSubaccountId(provisioned);
+                    userRepo.save(driverUser);
+                }
+            }
             chapaSubaccountId = driverUser != null ? driverUser.getChapaSubaccountId() : null;
             providerSnapshot = buildDriverPayoutSnapshot(driverUser);
 
@@ -609,6 +684,7 @@ public class PaymentGatewayService {
         tx.setBusinessId(businessId);
         tx.setCurrency("ETB");
         tx.setGrossAmount(grossAmount.setScale(2, RoundingMode.HALF_UP));
+        tx.setCommissionRate(commissionRatePercent.setScale(2, RoundingMode.HALF_UP));
         tx.setCommissionAmount(commissionAmount.setScale(2, RoundingMode.HALF_UP));
         tx.setProviderAmount(providerAmount.setScale(2, RoundingMode.HALF_UP));
         tx.setTaxAmount(taxAmount.setScale(2, RoundingMode.HALF_UP));
@@ -1021,6 +1097,15 @@ public class PaymentGatewayService {
             cr.setGateway(tx.getGateway());
             cr.setGatewayTxRef(tx.getTxRef());
             cr.setChapaSubaccountId(tx.getChapaSubaccountId());
+            if (tx.getCommissionRate() != null) {
+                cr.setCommissionRate(tx.getCommissionRate());
+            }
+            if (tx.getCommissionAmount() != null) {
+                cr.setCommissionAmount(tx.getCommissionAmount());
+            }
+            if (tx.getProviderAmount() != null) {
+                cr.setProviderAmount(tx.getProviderAmount());
+            }
             cr.setPlatformCommissionAccount(formatAccountSummary(tx.getPlatformCommissionAccountSnapshot()));
             cr.setProviderPayoutAccount(formatAccountSummary(tx.getProviderPayoutAccountSnapshot()));
             cr.setCommissionSettlementStatus(tx.getCommissionLegStatus());
@@ -1061,13 +1146,17 @@ public class PaymentGatewayService {
         );
         payload.put("customization", custom);
 
+        BigDecimal splitFraction = tx.getCommissionRate() != null
+                ? toSplitFraction(tx.getCommissionRate())
+                : resolveDefaultCommissionFraction();
         if (tx.getChapaSubaccountId() != null
                 && !tx.getChapaSubaccountId().isBlank()
-                && !tx.getChapaSubaccountId().endsWith("-SANDBOX")) {
+                && !tx.getChapaSubaccountId().endsWith("-SANDBOX")
+                && splitFraction.compareTo(BigDecimal.ZERO) > 0) {
             Map<String, Object> sub = new LinkedHashMap<>();
             sub.put("id", tx.getChapaSubaccountId());
-            sub.put("split_type", "flat");
-            sub.put("split_value", tx.getCommissionAmount());
+            sub.put("split_type", "percentage");
+            sub.put("split_value", splitFraction);
             payload.put("subaccounts", sub);
         }
 
@@ -1165,7 +1254,8 @@ public class PaymentGatewayService {
             String bankCode,
             String accountNumber,
             String sandboxPrefix,
-            String existingSubaccountId
+            String existingSubaccountId,
+            BigDecimal splitFraction
     ) {
         if (bankCode == null || bankCode.isBlank() || accountNumber == null || accountNumber.isBlank()) {
             return existingSubaccountId;
@@ -1177,13 +1267,16 @@ public class PaymentGatewayService {
             return sandboxPrefix + "-SANDBOX";
         }
         try {
+            BigDecimal effectiveSplit = (splitFraction != null && splitFraction.compareTo(BigDecimal.ZERO) > 0)
+                    ? splitFraction
+                    : resolveDefaultCommissionFraction();
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("business_name", businessName);
             payload.put("account_name", accountName);
             payload.put("bank_code", bankCode);
             payload.put("account_number", accountNumber);
             payload.put("split_type", "percentage");
-            payload.put("split_value", 0.10);
+            payload.put("split_value", effectiveSplit);
 
             String json = objectMapper.writeValueAsString(payload);
             HttpRequest req = HttpRequest.newBuilder()

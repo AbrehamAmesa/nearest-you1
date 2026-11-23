@@ -166,7 +166,11 @@ export const CompareDrawer: React.FC<CompareDrawerProps> = ({
                     return (
                       <td key={item.id} className="px-4 py-3 text-[#172B3A]">
                         {pol.deliveryAvailable
-                          ? `With Delivery (~${pol.estimatedDeliveryMinutes} min)`
+                          ? `With Delivery (~${pol.estimatedDeliveryMinutes} min${
+                              pol.freeDeliveryMaxKm > 0
+                                ? ` · Free 0–${pol.freeDeliveryMaxKm} km`
+                                : ' · Buyer pays delivery'
+                            })`
                           : 'Without Delivery (Pickup Only)'}{' '}
                         ·{' '}
                         {pol.isFood

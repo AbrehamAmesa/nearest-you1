@@ -496,7 +496,7 @@ public class BusinessAndListingService {
                 "introVideoUrl", "companyLogoUrl", "variants", "deliveryOptions",
                 "schedule", "capacity", "employmentType", "contractType", "vehicleType",
                 "brand", "sku", "stockQuantity", "prepTimeMinutes", "durationMinutes",
-                "deliveryAvailable", "immediateAcceptance", "estimatedReadyMinutes",
+                "deliveryAvailable", "freeDeliveryMaxKm", "immediateAcceptance", "estimatedReadyMinutes",
                 "estimatedDeliveryMinutes", "deliveryWindowLabel", "returnable",
                 "returnWindowDays", "returnLossPercent", "returnLossFixedEtb",
                 "deliveryFeeNonRefundableOnReturn", "returnPolicyNote"

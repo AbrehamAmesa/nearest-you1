@@ -16,6 +16,7 @@ export interface ListingMetadata {
   prepTimeMinutes?: number;
   durationMinutes?: number;
   deliveryAvailable?: boolean;
+  freeDeliveryMaxKm?: number | null;
   immediateAcceptance?: boolean;
   estimatedReadyMinutes?: number;
   estimatedDeliveryMinutes?: number;
@@ -290,6 +291,7 @@ export interface OrderRecord {
   rejectionReason?: string | null;
   returnPolicySnapshot?: {
     deliveryAvailable?: boolean;
+    freeDeliveryMaxKm?: number | null;
     returnable?: boolean;
     returnWindowDays?: number;
     returnLossPercent?: number;
@@ -745,6 +747,7 @@ export interface PaymentTransactionRecord {
   businessId?: number | null;
   currency: string;
   grossAmount: string | number;
+  commissionRate?: string | number | null;
   commissionAmount: string | number;
   providerAmount: string | number;
   taxAmount: string | number;

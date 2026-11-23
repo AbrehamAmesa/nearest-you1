@@ -96,6 +96,7 @@ public class OrderAndBookingService {
 
             boolean isFoodOrder = "FOOD".equalsIgnoreCase(group.orderType());
             boolean groupDeliverySupported = true;
+            Double groupFreeDeliveryMaxKm = null;
             boolean groupImmediateAcceptance = !isFoodOrder;
             Integer maxReadyMinutes = null;
             Integer maxDeliveryMinutes = null;
@@ -119,14 +120,20 @@ public class OrderAndBookingService {
 
                 Map<String, Object> meta = listing.getMetadata() != null ? listing.getMetadata() : Map.of();
                 boolean itemDeliveryAvailable = !(meta.get("deliveryAvailable") instanceof Boolean b) || b;
+                double itemFreeMaxKm = itemDeliveryAvailable ? Math.max(0.0, toDouble(meta.get("freeDeliveryMaxKm"), 0.0)) : 0.0;
                 if (!itemDeliveryAvailable) {
                     groupDeliverySupported = false;
+                    groupFreeDeliveryMaxKm = 0.0;
                     if ("DELIVERY".equalsIgnoreCase(group.fulfillmentType())) {
                         throw new ApiException(
                                 HttpStatus.BAD_REQUEST,
                                 "\"" + listing.getTitle() + "\" is advertised Without Delivery (Store Pickup Only)."
                         );
                     }
+                } else {
+                    groupFreeDeliveryMaxKm = groupFreeDeliveryMaxKm == null
+                            ? itemFreeMaxKm
+                            : Math.min(groupFreeDeliveryMaxKm, itemFreeMaxKm);
                 }
 
                 if (!isFoodOrder && meta.get("immediateAcceptance") instanceof Boolean imm && !imm) {
@@ -181,6 +188,7 @@ public class OrderAndBookingService {
                 snap.put("unitPrice", activePrice);
                 snap.put("lineTotal", lineTotal);
                 snap.put("deliveryAvailable", itemDeliveryAvailable);
+                snap.put("freeDeliveryMaxKm", itemFreeMaxKm);
                 snap.put("returnable", itemReturnable);
                 snap.put("returnLossPercent", lossPct);
                 snap.put("returnLossFixedEtb", lossFixed);
@@ -188,8 +196,15 @@ public class OrderAndBookingService {
                 snapshot.add(snap);
             }
 
-            BigDecimal deliveryFee = "DELIVERY".equalsIgnoreCase(group.fulfillmentType()) && group.deliveryFee() != null
-                    ? group.deliveryFee() : BigDecimal.ZERO;
+            double resolvedFreeKm = groupFreeDeliveryMaxKm != null ? groupFreeDeliveryMaxKm : 0.0;
+            BigDecimal deliveryFee = BigDecimal.ZERO;
+            if ("DELIVERY".equalsIgnoreCase(group.fulfillmentType())) {
+                if (group.distanceKm() != null && resolvedFreeKm > 0 && group.distanceKm().doubleValue() <= resolvedFreeKm) {
+                    deliveryFee = BigDecimal.ZERO;
+                } else if (group.deliveryFee() != null) {
+                    deliveryFee = group.deliveryFee().max(BigDecimal.ZERO);
+                }
+            }
             BigDecimal taxAmount = subtotal.multiply(BigDecimal.valueOf(taxRate / 100.0)).setScale(2, RoundingMode.HALF_UP);
             BigDecimal totalAmount = subtotal.add(deliveryFee).add(taxAmount).setScale(2, RoundingMode.HALF_UP);
             String orderNumber = "NY-ORD-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
@@ -209,6 +224,7 @@ public class OrderAndBookingService {
 
             Map<String, Object> returnPolicySnap = new LinkedHashMap<>();
             returnPolicySnap.put("deliveryAvailable", groupDeliverySupported);
+            returnPolicySnap.put("freeDeliveryMaxKm", resolvedFreeKm);
             returnPolicySnap.put("returnable", allReturnable);
             returnPolicySnap.put("returnWindowDays", allReturnable ? minReturnWindowDays : 0);
             returnPolicySnap.put("returnLossPercent", allReturnable ? maxReturnLossPercent : 100.0);

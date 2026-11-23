@@ -61,6 +61,9 @@ public class PaymentTransaction {
     @Column(name = "gross_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal grossAmount;
 
+    @Column(name = "commission_rate", precision = 5, scale = 2)
+    private BigDecimal commissionRate;
+
     @Column(name = "commission_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal commissionAmount;
 
@@ -161,6 +164,9 @@ public class PaymentTransaction {
 
     public BigDecimal getGrossAmount() { return grossAmount; }
     public void setGrossAmount(BigDecimal grossAmount) { this.grossAmount = grossAmount; }
+
+    public BigDecimal getCommissionRate() { return commissionRate; }
+    public void setCommissionRate(BigDecimal commissionRate) { this.commissionRate = commissionRate; }
 
     public BigDecimal getCommissionAmount() { return commissionAmount; }
     public void setCommissionAmount(BigDecimal commissionAmount) { this.commissionAmount = commissionAmount; }
