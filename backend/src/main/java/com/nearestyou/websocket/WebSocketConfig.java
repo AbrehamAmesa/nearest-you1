@@ -5,6 +5,7 @@ import com.nearestyou.security.AuthTokenResolver;
 import com.nearestyou.security.UserPrincipal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
@@ -14,6 +15,7 @@ import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.server.HandshakeInterceptor;
+import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URLDecoder;
@@ -84,6 +86,14 @@ public class WebSocketConfig implements WebSocketConfigurer {
         registry.addHandler(liveChatWebSocketHandler, "/api/v1/ws/chat", "/ws/chat")
                 .addInterceptors(authInterceptor)
                 .setAllowedOriginPatterns("*");
+    }
+
+    @Bean
+    public ServletServerContainerFactoryBean createWebSocketContainer() {
+        ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
+        container.setMaxTextMessageBufferSize(4 * 1024 * 1024);
+        container.setMaxBinaryMessageBufferSize(4 * 1024 * 1024);
+        return container;
     }
 
     private String extractToken(ServerHttpRequest request) {

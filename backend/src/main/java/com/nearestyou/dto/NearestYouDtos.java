@@ -238,7 +238,10 @@ public final class NearestYouDtos {
         Long bookingId,
         String threadKey,
         String recipientUid,
-        @NotBlank String body
+        String body,
+        String messageType,
+        String audioDataUrl,
+        Integer audioDurationSeconds
     ) {}
 
     public record CreateDocumentTypeRequest(

@@ -309,6 +309,62 @@ export function useLiveChat({
     [threadKey, dbUser, businessId, listingId, orderId, bookingId, recipientUid]
   );
 
+  const sendVoiceMessage = useCallback(
+    async (audioDataUrl: string, durationSeconds: number): Promise<boolean> => {
+      if (!audioDataUrl || !threadKey || !dbUser) return false;
+      const safeDuration = Math.max(1, Math.min(180, Math.round(durationSeconds || 1)));
+      const mins = Math.floor(safeDuration / 60);
+      const secs = safeDuration % 60;
+      const fallbackBody = `Voice message (${mins}:${secs < 10 ? '0' : ''}${secs})`;
+
+      setSending(true);
+      setError(null);
+
+      try {
+        const res = await engagementApi.sendMessage({
+          threadKey,
+          businessId: businessId ?? null,
+          listingId: listingId ?? null,
+          orderId: orderId ?? null,
+          bookingId: bookingId ?? null,
+          recipientUid: recipientUid ?? null,
+          messageType: 'VOICE',
+          body: fallbackBody,
+          audioDataUrl,
+          audioDurationSeconds: safeDuration,
+        });
+        const saved: ChatMessage | undefined = res.data;
+        if (saved && saved.id) {
+          setMessages((prev) => mergeMessages(prev, [saved]));
+          onMessageRef.current?.(saved);
+        } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: 'chat:send',
+              threadKey,
+              businessId,
+              listingId,
+              orderId,
+              bookingId,
+              recipientUid,
+              messageType: 'VOICE',
+              body: fallbackBody,
+              audioDataUrl,
+              audioDurationSeconds: safeDuration,
+            })
+          );
+        }
+        return true;
+      } catch (err: any) {
+        setError(err?.response?.data?.error || 'Failed to send voice message. Please try again.');
+        return false;
+      } finally {
+        if (mountedRef.current) setSending(false);
+      }
+    },
+    [threadKey, dbUser, businessId, listingId, orderId, bookingId, recipientUid]
+  );
+
   return {
     messages,
     partnerPresence,
@@ -317,6 +373,7 @@ export function useLiveChat({
     connected,
     error,
     sendMessage,
+    sendVoiceMessage,
     refresh: () => fetchThreadHistory(false),
   };
 }

@@ -498,13 +498,43 @@ public class AdminGovernanceService {
 
     @Transactional
     public PlatformSetting updatePricingPolicy(UserPrincipal admin, Map<String, Object> policy) {
+        Map<String, Object> cleanPolicy = new LinkedHashMap<>(policy != null ? policy : Map.of());
+        boolean applyToAllCategories = Boolean.TRUE.equals(cleanPolicy.remove("applyCommissionToAllCategories"));
+
+        double commPct = 10.0;
+        Object rawComm = cleanPolicy.get("defaultCommissionPercent");
+        if (rawComm instanceof Number n) {
+            commPct = n.doubleValue();
+        } else if (rawComm instanceof String s) {
+            try {
+                commPct = Double.parseDouble(s.trim());
+            } catch (NumberFormatException ignored) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Platform commission percentage must be a valid number.");
+            }
+        }
+        if (commPct < 0.0 || commPct > 50.0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Platform commission percentage must be between 0% and 50%.");
+        }
+        BigDecimal commBd = BigDecimal.valueOf(commPct).setScale(2, RoundingMode.HALF_UP);
+        cleanPolicy.put("defaultCommissionPercent", commBd.doubleValue());
+
         PlatformSetting setting = settingRepo.findBySettingKey("pricing_policy")
                 .orElseGet(PlatformSetting::new);
         setting.setSettingKey("pricing_policy");
-        setting.setSettingValue(policy);
+        setting.setSettingValue(cleanPolicy);
         PlatformSetting saved = settingRepo.save(setting);
 
-        recordAudit(admin, "PRICING_POLICY_UPDATED", "platform_settings", "pricing_policy", policy);
+        if (applyToAllCategories) {
+            List<ServiceCategory> allCats = categoryRepo.findAll();
+            for (ServiceCategory c : allCats) {
+                c.setCommissionRate(commBd);
+            }
+            categoryRepo.saveAll(allCats);
+        }
+
+        Map<String, Object> auditDetails = new LinkedHashMap<>(cleanPolicy);
+        auditDetails.put("appliedToAllCategories", applyToAllCategories);
+        recordAudit(admin, "PRICING_POLICY_UPDATED", "platform_settings", "pricing_policy", auditDetails);
         return saved;
     }
 

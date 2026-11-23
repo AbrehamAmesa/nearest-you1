@@ -239,7 +239,7 @@ export interface ReviewItem {
 export interface PlatformPolicy {
   currency: string;
   taxRatePercent: number;
-  defaultCommissionPercent: number;
+  defaultCommissionPercent?: number;
   deliveryBaseFee: number;
   deliveryPerKmRate: number;
   expressMultiplier: number;
@@ -605,7 +605,10 @@ export interface ChatMessage {
   orderId?: number | null;
   bookingId?: number | null;
   threadKey?: string | null;
+  messageType?: 'TEXT' | 'VOICE' | string | null;
   body: string;
+  audioDataUrl?: string | null;
+  audioDurationSeconds?: number | null;
   createdAt: string;
 }
 
@@ -702,7 +705,7 @@ export interface PlatformCommissionAccountConfig {
 }
 
 export interface PaymentGatewayConfig {
-  platformCommissionAccount: PlatformCommissionAccountConfig;
+  platformCommissionAccount?: PlatformCommissionAccountConfig | null;
   banks: BankDirectoryItem[];
   gateways: {
     chapa: { enabled: boolean; configured?: boolean; mode: 'LIVE' | 'SANDBOX' | 'NOT_CONFIGURED' | string };

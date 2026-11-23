@@ -139,6 +139,10 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
 
   // Policy edit state
   const [taxRate, setTaxRate] = useState(policy.taxRatePercent);
+  const [defaultCommissionPercent, setDefaultCommissionPercent] = useState(
+    policy.defaultCommissionPercent ?? 10
+  );
+  const [applyCommissionToAllCategories, setApplyCommissionToAllCategories] = useState(false);
   const [deliveryBase, setDeliveryBase] = useState(policy.deliveryBaseFee);
   const [deliveryPerKm, setDeliveryPerKm] = useState(policy.deliveryPerKmRate);
   const [rideBase, setRideBase] = useState(policy.rideBaseFare);
@@ -178,6 +182,9 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
 
   useEffect(() => {
     setTaxRate(policy.taxRatePercent);
+    if (policy.defaultCommissionPercent !== undefined) {
+      setDefaultCommissionPercent(policy.defaultCommissionPercent);
+    }
     setDeliveryBase(policy.deliveryBaseFee);
     setDeliveryPerKm(policy.deliveryPerKmRate);
     setRideBase(policy.rideBaseFare);
@@ -219,6 +226,12 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
         setDeliveries(data.deliveries || []);
         setCommissions(data.commissions || []);
         setAuditLogs(data.auditLogs || []);
+        const policySetting = Array.isArray(data.settings)
+          ? data.settings.find((s: { settingKey?: string; settingValue?: Record<string, unknown> }) => s.settingKey === 'pricing_policy')
+          : null;
+        if (policySetting?.settingValue?.defaultCommissionPercent !== undefined) {
+          setDefaultCommissionPercent(Number(policySetting.settingValue.defaultCommissionPercent) || 0);
+        }
         if (
           data.categories?.length &&
           !data.categories.some((c: Category) => c.id === reqCategoryId)
@@ -575,12 +588,14 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
 
   const handleSavePolicy = async (e: React.FormEvent) => {
     e.preventDefault();
+    const clampedCommission = Math.min(50, Math.max(0, Number(defaultCommissionPercent) || 0));
     const res = await authFetch('/api/v1/admin/pricing-policy', {
       method: 'PUT',
       body: JSON.stringify({
         currency: 'ETB',
         taxRatePercent: Number(taxRate),
-        defaultCommissionPercent: 10,
+        defaultCommissionPercent: clampedCommission,
+        applyCommissionToAllCategories,
         deliveryBaseFee: Number(deliveryBase),
         deliveryPerKmRate: Number(deliveryPerKm),
         expressMultiplier: 1.4,
@@ -590,9 +605,17 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
       }),
     });
     if (res.ok) {
-      onNotify('Platform pricing, VAT, and delivery match radius updated.');
+      onNotify(
+        applyCommissionToAllCategories
+          ? `Platform policy and ${clampedCommission}% commission updated across all categories.`
+          : 'Platform pricing, commission rate, VAT, and delivery match radius updated.'
+      );
+      setApplyCommissionToAllCategories(false);
       onRefreshCatalog();
       loadAdminData();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      onNotify(err.error || 'Could not update platform policy.');
     }
   };
 
@@ -2328,13 +2351,33 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
             className="space-y-4 rounded-2xl border border-[#172B3A]/10 bg-white p-6"
           >
             <h2 className="font-display text-lg font-semibold text-[#172B3A]">
-              Pricing, Delivery Radius & Fee Rules
+              Pricing, Commission, Delivery Radius &amp; Fee Rules
             </h2>
             <p className="text-xs text-[#172B3A]/65">
-              Changes apply strictly to new transactions; confirmed orders retain historical agreed
-              prices.
+              Admin-only configuration. Platform commission applies to new orders, bookings, and
+              deliveries (per-category overrides can also be set in the Categories tab, and the
+              collection account is configured below). Commission rates and totals remain hidden
+              from customers and service providers.
             </p>
             <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-medium text-[#172B3A]/75">
+                  Default Platform Commission (%)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={50}
+                  step={0.25}
+                  value={defaultCommissionPercent}
+                  onChange={(e) => setDefaultCommissionPercent(Number(e.target.value))}
+                  className="mt-1 h-10 w-full rounded-lg border border-[#176B52]/35 bg-emerald-50/30 px-3 font-mono text-xs font-semibold"
+                />
+                <p className="mt-1 text-[11px] text-[#172B3A]/60">
+                  Fallback rate (0–50%) used when a category has no custom override and for
+                  deliveries/rides.
+                </p>
+              </div>
               <div>
                 <label className="block text-xs font-medium text-[#172B3A]/75">VAT Rate (%)</label>
                 <input
@@ -2403,11 +2446,23 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                 />
               </div>
             </div>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#172B3A]/10 bg-[#F4F6F5]/70 px-3 py-2 text-xs font-medium text-[#172B3A]">
+              <input
+                type="checkbox"
+                checked={applyCommissionToAllCategories}
+                onChange={(e) => setApplyCommissionToAllCategories(e.target.checked)}
+                className="h-4 w-4 accent-[#176B52]"
+              />
+              <span>
+                Also apply <strong>{defaultCommissionPercent}%</strong> commission rate to all existing
+                service categories on save
+              </span>
+            </label>
             <button
               type="submit"
               className="min-h-[44px] rounded-lg bg-[#176B52] px-5 py-2.5 text-xs font-semibold text-white hover:bg-[#125641]"
             >
-              Save Platform Pricing & Radius Policy
+              Save Platform Commission, Pricing &amp; Radius Policy
             </button>
           </form>
 

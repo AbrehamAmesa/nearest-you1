@@ -106,13 +106,17 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
                 case "chat:send" -> {
                     String threadKey = asString(payload.get("threadKey"));
                     String body = asString(payload.get("body"));
+                    String messageType = asString(payload.get("messageType"));
+                    String audioDataUrl = asString(payload.get("audioDataUrl"));
+                    Integer audioDurationSeconds = asInteger(payload.get("audioDurationSeconds"));
                     Long businessId = asLong(payload.get("businessId"));
                     Long listingId = asLong(payload.get("listingId"));
                     Long orderId = asLong(payload.get("orderId"));
                     Long bookingId = asLong(payload.get("bookingId"));
                     String recipientUid = asString(payload.get("recipientUid"));
 
-                    if (body == null || body.isBlank()) {
+                    boolean hasVoice = audioDataUrl != null && !audioDataUrl.isBlank();
+                    if ((body == null || body.isBlank()) && !hasVoice) {
                         liveChatBroker.sendToSession(session, Map.of(
                                 "type", "error",
                                 "error", "Message cannot be empty."
@@ -129,7 +133,10 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
                             bookingId,
                             threadKey,
                             recipientUid,
-                            body
+                            body,
+                            messageType,
+                            audioDataUrl,
+                            audioDurationSeconds
                     );
                     engagementService.sendMessage(principal, req);
                     userSyncService.touchUserPresence(principal.uid(), true);
@@ -186,6 +193,17 @@ public class LiveChatWebSocketHandler extends TextWebSocketHandler {
         try {
             String raw = String.valueOf(value).trim();
             return raw.isEmpty() ? null : Long.parseLong(raw);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private Integer asInteger(Object value) {
+        if (value == null) return null;
+        if (value instanceof Number num) return num.intValue();
+        try {
+            String raw = String.valueOf(value).trim();
+            return raw.isEmpty() ? null : Integer.parseInt(raw);
         } catch (NumberFormatException ex) {
             return null;
         }

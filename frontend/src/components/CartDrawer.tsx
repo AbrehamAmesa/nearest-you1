@@ -481,8 +481,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 {(paymentMethod === 'CHAPA' || paymentMethod === 'PAYO') && (
                   <p className="rounded-lg border border-[#176B52]/20 bg-emerald-50/60 px-3 py-2 text-[11px] text-[#172B3A]/80">
                     {paymentMethod === 'CHAPA'
-                      ? 'Chapa Split Pay routes vendor sales directly to each seller’s own account and collects platform commission into one centralized platform account.'
-                      : 'Payo Direct splits payment into two verified transfers: net sales to the seller’s own account and platform commission to the single platform account.'}
+                      ? 'Chapa Checkout supports Telebirr, CBE Birr, local Ethiopian banks, and cards with server-side payment verification.'
+                      : 'Payo Direct lets you complete a verified Ethiopian bank transfer with automatic payment confirmation.'}
                   </p>
                 )}
               </div>

@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { paymentApi } from '../api/index.ts';
+import { useAuth } from '../context/AuthContext.tsx';
 import type {
   AccountSnapshot,
   DeliveryPaymentSummary,
@@ -100,6 +101,8 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
   viewerRole = 'RECEIVER',
   onClose,
 }) => {
+  const { dbUser } = useAuth();
+  const canViewCommission = viewerRole === 'ADMIN' || Boolean(dbUser?.isAdmin);
   const [fetchedTx, setFetchedTx] = useState<PaymentTransactionRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -275,7 +278,7 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
               {viewerRole === 'PARCEL_RECEIVER'
                 ? 'Verified payment confirmation for your incoming parcel'
                 : viewerRole === 'PAYER'
-                  ? 'Full payment receipt and split settlement breakdown'
+                  ? 'Verified payment receipt and transaction confirmation'
                   : 'Verified incoming payment receipt and settlement breakdown'}
             </p>
           </div>
@@ -332,52 +335,70 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* Financial Split Breakdown */}
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/70 p-3.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[#172B3A]/60">
-                    Gross Amount &amp; VAT
-                  </p>
-                  <p className="mt-1 font-mono text-base font-bold tabular-nums text-[#172B3A]">
-                    {formatEtb(grossAmount)}
-                  </p>
-                  <p className="mt-0.5 font-mono text-[11px] text-[#172B3A]/65">
-                    Includes Tax/VAT: {formatEtb(taxAmount)}
-                  </p>
-                </div>
-
-                {providerAmount !== null && viewerRole !== 'PARCEL_RECEIVER' && (
-                  <div className="rounded-xl border border-[#176B52]/25 bg-emerald-50/40 p-3.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-[#176B52]">
-                      {viewerRole === 'RECEIVER' ? 'Your Net Sales' : 'Provider Net Sales'}
-                    </p>
-                    <p className="mt-1 font-mono text-base font-bold tabular-nums text-[#176B52]">
-                      {formatEtb(providerAmount)}
-                    </p>
-                    {providerLegStatus && (
-                      <p className="mt-0.5 font-mono text-[10px] text-[#176B52]">
-                        {providerLegStatus}
+              {/* Financial Breakdown */}
+              {(() => {
+                const showProviderNet =
+                  providerAmount !== null &&
+                  viewerRole !== 'PARCEL_RECEIVER' &&
+                  (viewerRole === 'RECEIVER' || canViewCommission);
+                const showCommission =
+                  canViewCommission &&
+                  commissionAmount !== null &&
+                  viewerRole !== 'PARCEL_RECEIVER';
+                const colClass =
+                  showProviderNet && showCommission
+                    ? 'sm:grid-cols-3'
+                    : showProviderNet || showCommission
+                      ? 'sm:grid-cols-2'
+                      : 'grid-cols-1';
+                return (
+                  <div className={`grid gap-3 ${colClass}`}>
+                    <div className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/70 p-3.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#172B3A]/60">
+                        Gross Amount &amp; VAT
                       </p>
+                      <p className="mt-1 font-mono text-base font-bold tabular-nums text-[#172B3A]">
+                        {formatEtb(grossAmount)}
+                      </p>
+                      <p className="mt-0.5 font-mono text-[11px] text-[#172B3A]/65">
+                        Includes Tax/VAT: {formatEtb(taxAmount)}
+                      </p>
+                    </div>
+
+                    {showProviderNet && (
+                      <div className="rounded-xl border border-[#176B52]/25 bg-emerald-50/40 p-3.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-[#176B52]">
+                          {viewerRole === 'RECEIVER' ? 'Your Net Sales' : 'Provider Net Sales'}
+                        </p>
+                        <p className="mt-1 font-mono text-base font-bold tabular-nums text-[#176B52]">
+                          {formatEtb(providerAmount!)}
+                        </p>
+                        {providerLegStatus && (
+                          <p className="mt-0.5 font-mono text-[10px] text-[#176B52]">
+                            {providerLegStatus}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {showCommission && (
+                      <div className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/70 p-3.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-[#172B3A]/60">
+                          Platform Commission
+                        </p>
+                        <p className="mt-1 font-mono text-base font-bold tabular-nums text-[#172B3A]">
+                          {formatEtb(commissionAmount!)}
+                        </p>
+                        {commissionLegStatus && (
+                          <p className="mt-0.5 font-mono text-[10px] text-[#172B3A]/65">
+                            {commissionLegStatus}
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
-
-                {commissionAmount !== null && viewerRole !== 'PARCEL_RECEIVER' && (
-                  <div className="rounded-xl border border-[#172B3A]/10 bg-[#F4F6F5]/70 p-3.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-[#172B3A]/60">
-                      Platform Commission
-                    </p>
-                    <p className="mt-1 font-mono text-base font-bold tabular-nums text-[#172B3A]">
-                      {formatEtb(commissionAmount)}
-                    </p>
-                    {commissionLegStatus && (
-                      <p className="mt-0.5 font-mono text-[10px] text-[#172B3A]/65">
-                        {commissionLegStatus}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+                );
+              })()}
 
               {/* Metadata & References */}
               <div className="rounded-xl border border-[#172B3A]/10 bg-white p-4 space-y-2.5">
@@ -446,9 +467,9 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* Settlement Account Snapshots (hidden for anonymous parcel receiver) */}
-              {viewerRole !== 'PARCEL_RECEIVER' && (providerSnap || platformSnap) && (
-                <div className="grid gap-3 sm:grid-cols-2">
+              {/* Settlement Account Snapshots (hidden for anonymous parcel receiver; Platform Pool hidden for non-admins) */}
+              {viewerRole !== 'PARCEL_RECEIVER' && (providerSnap || (canViewCommission && platformSnap)) && (
+                <div className={`grid gap-3 ${canViewCommission && platformSnap && providerSnap ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
                   {providerSnap && (
                     <div className="rounded-xl border border-[#176B52]/20 bg-emerald-50/25 p-3.5 space-y-1.5">
                       <p className="flex items-center gap-1.5 font-semibold text-[#176B52]">
@@ -459,7 +480,7 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
                     </div>
                   )}
 
-                  {platformSnap && (
+                  {canViewCommission && platformSnap && (
                     <div className="rounded-xl border border-[#172B3A]/15 bg-[#F4F6F5]/60 p-3.5 space-y-1.5">
                       <p className="flex items-center gap-1.5 font-semibold text-[#172B3A]">
                         <Landmark className="h-3.5 w-3.5 text-[#176B52]" />
@@ -491,8 +512,8 @@ export const PaymentDetailsModal: React.FC<PaymentDetailsModalProps> = ({
                   <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-[#176B52]" />
                   <span>
                     Settled directly via <strong>{gatewayLabel}</strong> ({statusUpper}). Chapa &amp;
-                    Payo split-gateway receipts include full gateway reference IDs when processed via
-                    online checkout.
+                    Payo receipts include full gateway reference IDs when processed via online
+                    checkout.
                   </span>
                 </div>
               )}

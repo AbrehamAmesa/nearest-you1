@@ -23,8 +23,8 @@ public class PaymentController {
     }
 
     @GetMapping("/config")
-    public Map<String, Object> getConfig() {
-        return paymentGatewayService.getPublicPaymentConfig();
+    public Map<String, Object> getConfig(@AuthenticationPrincipal UserPrincipal principal) {
+        return paymentGatewayService.getPublicPaymentConfig(principal);
     }
 
     @GetMapping("/banks")

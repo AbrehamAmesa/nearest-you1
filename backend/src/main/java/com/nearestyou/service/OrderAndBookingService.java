@@ -63,9 +63,17 @@ public class OrderAndBookingService {
     @Transactional
     public List<CustomerOrder> createGroupedOrders(UserPrincipal principal, CreateOrdersRequest req) {
         double taxRate = 15.0;
+        BigDecimal defaultPolicyCommission = new BigDecimal("10.00");
         Optional<PlatformSetting> policyOpt = settingRepo.findBySettingKey("pricing_policy");
-        if (policyOpt.isPresent() && policyOpt.get().getSettingValue().get("taxRatePercent") instanceof Number n) {
-            taxRate = n.doubleValue();
+        if (policyOpt.isPresent()) {
+            Map<String, Object> pv = policyOpt.get().getSettingValue();
+            if (pv != null && pv.get("taxRatePercent") instanceof Number n) {
+                taxRate = n.doubleValue();
+            }
+            if (pv != null && pv.get("defaultCommissionPercent") instanceof Number cn) {
+                defaultPolicyCommission = BigDecimal.valueOf(Math.max(0.0, Math.min(50.0, cn.doubleValue())))
+                        .setScale(2, RoundingMode.HALF_UP);
+            }
         }
 
         List<CustomerOrder> createdOrders = new ArrayList<>();
@@ -80,7 +88,7 @@ public class OrderAndBookingService {
             }
             BigDecimal commissionRate = categoryRepo.findById(biz.getCategoryId())
                     .map(ServiceCategory::getCommissionRate)
-                    .orElse(new BigDecimal("10.00"));
+                    .orElse(defaultPolicyCommission);
 
             BigDecimal subtotal = BigDecimal.ZERO;
             BigDecimal totalDiscount = BigDecimal.ZERO;
@@ -395,9 +403,22 @@ public class OrderAndBookingService {
         if (principal.uid().equals(biz.getOwnerUid())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "You cannot book or send a service request to your own advertisement.");
         }
+        double taxRate = 15.0;
+        BigDecimal defaultPolicyCommission = new BigDecimal("10.00");
+        Optional<PlatformSetting> policyOpt = settingRepo.findBySettingKey("pricing_policy");
+        if (policyOpt.isPresent()) {
+            Map<String, Object> pv = policyOpt.get().getSettingValue();
+            if (pv != null && pv.get("taxRatePercent") instanceof Number n) {
+                taxRate = n.doubleValue();
+            }
+            if (pv != null && pv.get("defaultCommissionPercent") instanceof Number cn) {
+                defaultPolicyCommission = BigDecimal.valueOf(Math.max(0.0, Math.min(50.0, cn.doubleValue())))
+                        .setScale(2, RoundingMode.HALF_UP);
+            }
+        }
         BigDecimal commissionRate = categoryRepo.findById(listing.getCategoryId())
                 .map(ServiceCategory::getCommissionRate)
-                .orElse(new BigDecimal("10.00"));
+                .orElse(defaultPolicyCommission);
 
         LocalDate start = LocalDate.parse(req.scheduledDate());
         LocalDate end = (req.endDate() != null && !req.endDate().isBlank()) ? LocalDate.parse(req.endDate()) : start;

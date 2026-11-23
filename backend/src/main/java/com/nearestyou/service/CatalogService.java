@@ -287,14 +287,39 @@ public class CatalogService {
                 })
                 .toList();
 
+        boolean isAdminCaller = authenticatedUser != null && (authenticatedUser.isAdmin()
+                || (authenticatedUser.getRoles() != null
+                && (authenticatedUser.getRoles().contains("ADMIN") || authenticatedUser.getRoles().contains("SUPER_ADMIN"))));
+
         double deliveryMatchRadiusKm = 5.0;
+        List<Map<String, Object>> visibleSettings = new ArrayList<>();
         for (PlatformSetting s : settings) {
+            if ("platform_commission_account".equals(s.getSettingKey()) && !isAdminCaller) {
+                continue;
+            }
             if ("pricing_policy".equals(s.getSettingKey()) && s.getSettingValue() != null) {
                 Object val = s.getSettingValue().get("deliveryMatchRadiusKm");
                 if (val instanceof Number n && n.doubleValue() > 0) {
                     deliveryMatchRadiusKm = n.doubleValue();
                 }
+                Map<String, Object> policyCopy = new LinkedHashMap<>(s.getSettingValue());
+                if (!isAdminCaller) {
+                    policyCopy.remove("defaultCommissionPercent");
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", s.getId());
+                row.put("settingKey", s.getSettingKey());
+                row.put("settingValue", policyCopy);
+                row.put("updatedAt", s.getUpdatedAt());
+                visibleSettings.add(row);
+                continue;
             }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", s.getId());
+            row.put("settingKey", s.getSettingKey());
+            row.put("settingValue", s.getSettingValue());
+            row.put("updatedAt", s.getUpdatedAt());
+            visibleSettings.add(row);
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -307,7 +332,7 @@ public class CatalogService {
         result.put("listings", activeListings);
         result.put("liveProviders", liveProviders);
         result.put("reviews", recentReviews);
-        result.put("settings", settings);
+        result.put("settings", visibleSettings);
         result.put("knownLocations", knownLocationRepo.findByActiveTrueOrderByCityAscSubCityAscNameAsc());
         result.put("deliveryMatchRadiusKm", deliveryMatchRadiusKm);
         return result;

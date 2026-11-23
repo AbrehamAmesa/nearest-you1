@@ -1,5 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { MessageSquare, Send, ShieldAlert, Wifi, WifiOff, X } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  MessageSquare,
+  Mic,
+  Pause,
+  Play,
+  Send,
+  ShieldAlert,
+  Square,
+  Trash2,
+  Volume2,
+  Wifi,
+  WifiOff,
+  X,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useLiveChat } from '../hooks/useLiveChat.ts';
 import type { ChatMessage, ServiceContractRecord } from '../types/nearestyou.ts';
@@ -26,6 +39,161 @@ interface LiveChatPanelProps {
   onContractUpdated?: (contract: ServiceContractRecord) => void;
 }
 
+const MAX_RECORDING_SECONDS = 60;
+
+function formatDurationClock(totalSeconds: number | null | undefined): string {
+  const safe = Math.max(0, Math.round(totalSeconds || 0));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string' && reader.result.startsWith('data:')) {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Could not encode audio recording.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Failed to read recorded audio.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+interface VoiceMessageBubbleProps {
+  audioDataUrl: string;
+  durationSeconds?: number | null;
+  isMine: boolean;
+}
+
+const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
+  audioDataUrl,
+  durationSeconds,
+  isMine,
+}) => {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [resolvedDuration, setResolvedDuration] = useState<number>(durationSeconds || 0);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleLoaded = () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        setResolvedDuration(Math.round(audio.duration));
+      }
+    };
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime || 0);
+    };
+    const handleEnded = () => {
+      setPlaying(false);
+      setCurrentTime(0);
+    };
+    const handlePause = () => setPlaying(false);
+    const handlePlay = () => setPlaying(true);
+
+    audio.addEventListener('loadedmetadata', handleLoaded);
+    audio.addEventListener('durationchange', handleLoaded);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('pause', handlePause);
+    audio.addEventListener('play', handlePlay);
+
+    return () => {
+      audio.removeEventListener('loadedmetadata', handleLoaded);
+      audio.removeEventListener('durationchange', handleLoaded);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('play', handlePlay);
+    };
+  }, [audioDataUrl]);
+
+  const togglePlay = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) {
+      audio.pause();
+    } else {
+      try {
+        await audio.play();
+      } catch {
+        setPlaying(false);
+      }
+    }
+  };
+
+  const totalSec = resolvedDuration > 0 ? resolvedDuration : durationSeconds || 1;
+  const progressPct = Math.min(100, Math.max(0, (currentTime / Math.max(1, totalSec)) * 100));
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    audio.currentTime = ratio * audio.duration;
+    setCurrentTime(audio.currentTime);
+  };
+
+  return (
+    <div className="flex min-w-[190px] max-w-[260px] items-center gap-2.5">
+      <audio ref={audioRef} src={audioDataUrl} preload="metadata" className="hidden" />
+      <button
+        type="button"
+        onClick={togglePlay}
+        aria-label={playing ? 'Pause voice message' : 'Play voice message'}
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${
+          isMine
+            ? 'bg-white/20 text-white hover:bg-white/30'
+            : 'bg-[#176B52] text-white hover:bg-[#125641]'
+        }`}
+      >
+        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="ml-0.5 h-3.5 w-3.5" />}
+      </button>
+      <div className="min-w-0 flex-1">
+        <div
+          onClick={handleSeek}
+          role="progressbar"
+          aria-valuenow={Math.round(progressPct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className={`relative h-2 w-full cursor-pointer overflow-hidden rounded-full ${
+            isMine ? 'bg-white/25' : 'bg-slate-200'
+          }`}
+        >
+          <div
+            className={`h-full rounded-full transition-all ${
+              isMine ? 'bg-emerald-200' : 'bg-[#176B52]'
+            }`}
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+        <div
+          className={`mt-1 flex items-center justify-between text-[10px] font-medium ${
+            isMine ? 'text-emerald-100' : 'text-slate-500'
+          }`}
+        >
+          <span className="inline-flex items-center gap-1">
+            <Volume2 className="h-3 w-3" />
+            Voice
+          </span>
+          <span>
+            {playing
+              ? `${formatDurationClock(currentTime)} / ${formatDurationClock(totalSec)}`
+              : formatDurationClock(totalSec)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   threadKey,
   businessId,
@@ -49,7 +217,23 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
   const { dbUser, firebaseUser, openAuthModal } = useAuth();
   const [draft, setDraft] = useState('');
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [voiceLevels, setVoiceLevels] = useState<number[]>([25, 45, 35, 60, 30, 50, 40]);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [sendingVoice, setSendingVoice] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingStartMsRef = useRef<number>(0);
+  const recordingTimerRef = useRef<number | null>(null);
+  const levelRafRef = useRef<number | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const cancelRecordingRef = useRef(false);
+  const pressStartedAtRef = useRef<number>(0);
+  const mountedRef = useRef(true);
 
   const isSelfRecipient = Boolean(
     recipientUid &&
@@ -57,22 +241,66 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         (firebaseUser?.uid && recipientUid === firebaseUser.uid))
   );
 
-  const { messages, partnerPresence, loading, sending, connected, error, sendMessage } = useLiveChat({
-    threadKey,
-    businessId,
-    listingId,
-    orderId,
-    bookingId,
-    recipientUid,
-    enabled: Boolean(dbUser && threadKey && !isSelfRecipient),
-    onMessageReceived: onMessageSentOrReceived,
-    onContractUpdated,
-  });
+  const { messages, partnerPresence, loading, sending, connected, error, sendMessage, sendVoiceMessage } =
+    useLiveChat({
+      threadKey,
+      businessId,
+      listingId,
+      orderId,
+      bookingId,
+      recipientUid,
+      enabled: Boolean(dbUser && threadKey && !isSelfRecipient),
+      onMessageReceived: onMessageSentOrReceived,
+      onContractUpdated,
+    });
+
+  const releaseRecorderResources = useCallback(() => {
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (levelRafRef.current !== null) {
+      window.cancelAnimationFrame(levelRafRef.current);
+      levelRafRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try {
+        audioCtxRef.current.close();
+      } catch {
+        /* ignore */
+      }
+      audioCtxRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          /* ignore */
+        }
+      });
+      mediaStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+  }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     const id = window.setInterval(() => setNowTick(Date.now()), 15000);
-    return () => window.clearInterval(id);
-  }, []);
+    return () => {
+      mountedRef.current = false;
+      window.clearInterval(id);
+      cancelRecordingRef.current = true;
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+      releaseRecorderResources();
+    };
+  }, [releaseRecorderResources]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -81,9 +309,209 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     }
   }, [messages.length, threadKey]);
 
+  const stopAndSendRecording = useCallback(() => {
+    const rec = mediaRecorderRef.current;
+    if (!rec || rec.state === 'inactive') return;
+    cancelRecordingRef.current = false;
+    try {
+      rec.stop();
+    } catch {
+      releaseRecorderResources();
+      if (mountedRef.current) setIsRecording(false);
+    }
+  }, [releaseRecorderResources]);
+
+  const cancelRecording = useCallback(() => {
+    cancelRecordingRef.current = true;
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== 'inactive') {
+      try {
+        rec.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    releaseRecorderResources();
+    if (mountedRef.current) {
+      setIsRecording(false);
+      setRecordingSeconds(0);
+    }
+  }, [releaseRecorderResources]);
+
+  const startAutoRecording = useCallback(async () => {
+    if (isRecording || sending || sendingVoice || isSelfRecipient) return;
+    setVoiceError(null);
+
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      setVoiceError('Voice recording is not supported in this browser.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      mediaStreamRef.current = stream;
+      audioChunksRef.current = [];
+      cancelRecordingRef.current = false;
+
+      const preferredTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+      ];
+      const chosenMime = preferredTypes.find((type) => {
+        try {
+          return typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(type);
+        } catch {
+          return false;
+        }
+      });
+
+      const recorder = chosenMime
+        ? new MediaRecorder(stream, { mimeType: chosenMime, audioBitsPerSecond: 24000 })
+        : new MediaRecorder(stream, { audioBitsPerSecond: 24000 });
+
+      mediaRecorderRef.current = recorder;
+      recordingStartMsRef.current = Date.now();
+      setIsRecording(true);
+      setRecordingSeconds(0);
+
+      // Visual voice level meter
+      try {
+        const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioContextCtor) {
+          const ctx = new AudioContextCtor();
+          audioCtxRef.current = ctx;
+          const source = ctx.createMediaStreamSource(stream);
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 32;
+          source.connect(analyser);
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          let lastSample = 0;
+
+          const tickLevel = (ts: number) => {
+            if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return;
+            if (ts - lastSample > 90) {
+              lastSample = ts;
+              analyser.getByteFrequencyData(dataArray);
+              const bars = Array.from({ length: 7 }, (_, i) => {
+                const raw = dataArray[i % dataArray.length] || 0;
+                return Math.max(18, Math.min(100, Math.round((raw / 255) * 100) + 18));
+              });
+              if (mountedRef.current) setVoiceLevels(bars);
+            }
+            levelRafRef.current = window.requestAnimationFrame(tickLevel);
+          };
+          levelRafRef.current = window.requestAnimationFrame(tickLevel);
+        }
+      } catch {
+        /* fallback static animation bars handled gracefully */
+      }
+
+      recordingTimerRef.current = window.setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recordingStartMsRef.current) / 1000);
+        if (mountedRef.current) setRecordingSeconds(elapsed);
+        if (elapsed >= MAX_RECORDING_SECONDS) {
+          stopAndSendRecording();
+        }
+      }, 250);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const shouldCancel = cancelRecordingRef.current;
+        const elapsedSec = Math.max(1, Math.round((Date.now() - recordingStartMsRef.current) / 1000));
+        const chunks = [...audioChunksRef.current];
+        const mimeType = recorder.mimeType || chosenMime || 'audio/webm';
+
+        releaseRecorderResources();
+        if (mountedRef.current) {
+          setIsRecording(false);
+          setRecordingSeconds(0);
+        }
+
+        if (shouldCancel) return;
+
+        const blob = new Blob(chunks, { type: mimeType });
+        if (blob.size < 200) {
+          if (mountedRef.current) {
+            setVoiceError('Recording was too short. Speak briefly and try again.');
+          }
+          return;
+        }
+
+        if (mountedRef.current) setSendingVoice(true);
+        try {
+          const dataUrl = await blobToDataUrl(blob);
+          const ok = await sendVoiceMessage(dataUrl, elapsedSec);
+          if (ok) {
+            onMessageSent?.(`Voice message (${formatDurationClock(elapsedSec)})`);
+          }
+        } catch (err: any) {
+          if (mountedRef.current) {
+            setVoiceError(err?.message || 'Could not send voice message.');
+          }
+        } finally {
+          if (mountedRef.current) setSendingVoice(false);
+        }
+      };
+
+      recorder.start(200);
+    } catch (err: any) {
+      releaseRecorderResources();
+      if (mountedRef.current) {
+        setIsRecording(false);
+        setVoiceError(
+          err?.name === 'NotAllowedError'
+            ? 'Microphone permission denied. Allow mic access to send voice messages.'
+            : 'Could not access microphone for automatic voice recording.'
+        );
+      }
+    }
+  }, [
+    isRecording,
+    sending,
+    sendingVoice,
+    isSelfRecipient,
+    releaseRecorderResources,
+    stopAndSendRecording,
+    sendVoiceMessage,
+    onMessageSent,
+  ]);
+
+  const handleMicPointerDown = () => {
+    if (isRecording) return;
+    pressStartedAtRef.current = Date.now();
+    void startAutoRecording();
+  };
+
+  const handleMicPointerUp = () => {
+    if (!isRecording) return;
+    const heldMs = Date.now() - pressStartedAtRef.current;
+    // Hold-to-talk (>450ms): releasing immediately stops & sends automatically.
+    // Quick tap (<450ms): stays recording until user taps Stop & Send.
+    if (heldMs > 450) {
+      stopAndSendRecording();
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!draft.trim() || sending || isSelfRecipient) return;
+    if (!draft.trim() || sending || sendingVoice || isSelfRecipient) return;
     const text = draft;
     setDraft('');
     const ok = await sendMessage(text);
@@ -108,7 +536,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         <MessageSquare className="mx-auto mb-2 h-8 w-8 text-[#176B52]" />
         <p className="text-sm font-bold text-[#172B3A]">Sign in to contact & start live chat</p>
         <p className="mt-1 text-xs text-slate-600">
-          Direct messages and instant replies are synced to your account.
+          Direct messages, voice notes, and instant replies are synced to your account.
         </p>
         <button
           type="button"
@@ -202,7 +630,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
             <MessageSquare className="mb-2 h-7 w-7 text-slate-300" />
             <p className="text-xs font-semibold text-slate-600">No messages yet</p>
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Write a message below to ask questions, agree on scope, or coordinate directly.
+              Write a message or tap the mic button to record & auto-send a voice note.
             </p>
           </div>
         ) : (
@@ -218,6 +646,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
               hour: '2-digit',
               minute: '2-digit',
             });
+            const isVoice = msg.messageType === 'VOICE' || Boolean(msg.audioDataUrl);
 
             return (
               <div
@@ -240,7 +669,15 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
                       : 'rounded-tl-sm border border-slate-200 bg-white text-slate-800'
                   }`}
                 >
-                  {msg.body}
+                  {isVoice && msg.audioDataUrl ? (
+                    <VoiceMessageBubble
+                      audioDataUrl={msg.audioDataUrl}
+                      durationSeconds={msg.audioDurationSeconds}
+                      isMine={isMine}
+                    />
+                  ) : (
+                    msg.body
+                  )}
                 </div>
               </div>
             );
@@ -249,34 +686,87 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
       </div>
 
       {/* Error Notice */}
-      {error && (
+      {(error || voiceError) && (
         <div className="border-t border-red-200 bg-red-50 px-3 py-1.5 text-[11px] font-medium text-red-700 break-words">
-          {error}
+          {voiceError || error}
         </div>
       )}
 
-      {/* Composer */}
-      <form
-        onSubmit={handleSubmit}
-        className="flex w-full min-w-0 items-center gap-2 border-t border-slate-200 bg-white p-2 sm:p-2.5"
-      >
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={placeholder}
-          disabled={sending}
-          className="min-w-0 w-full flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#176B52] focus:bg-white focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={sending || !draft.trim()}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#176B52] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#125641] disabled:cursor-not-allowed disabled:opacity-50 sm:px-3.5"
+      {/* Composer or Active Auto Voice Recording Bar */}
+      {isRecording ? (
+        <div className="flex w-full min-w-0 items-center justify-between gap-2 border-t border-rose-200 bg-rose-50 px-2.5 py-2 sm:px-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="h-2.5 w-2.5 shrink-0 animate-ping rounded-full bg-rose-600" />
+            <span className="shrink-0 font-mono text-xs font-bold text-rose-800">
+              {formatDurationClock(recordingSeconds)}
+            </span>
+            <div className="hidden items-end gap-0.5 sm:flex" aria-hidden="true">
+              {voiceLevels.map((lvl, idx) => (
+                <span
+                  key={idx}
+                  className="w-1 rounded-full bg-rose-500 transition-all duration-100"
+                  style={{ height: `${Math.max(5, Math.round((lvl / 100) * 18))}px` }}
+                />
+              ))}
+            </div>
+            <span className="truncate text-[11px] font-semibold text-rose-700">
+              Recording voice...
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={cancelRecording}
+              title="Discard recording"
+              className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Cancel</span>
+            </button>
+            <button
+              type="button"
+              onClick={stopAndSendRecording}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#176B52] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#125641]"
+            >
+              <Square className="h-3 w-3 fill-current" />
+              <span>Stop &amp; Send</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form
+          onSubmit={handleSubmit}
+          className="flex w-full min-w-0 items-center gap-1.5 border-t border-slate-200 bg-white p-2 sm:gap-2 sm:p-2.5"
         >
-          <Send className="h-3.5 w-3.5" />
-          <span>{sending ? 'Sending...' : 'Send'}</span>
-        </button>
-      </form>
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={sendingVoice ? 'Sending voice message...' : placeholder}
+            disabled={sending || sendingVoice}
+            className="min-w-0 w-full flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#176B52] focus:bg-white focus:outline-none"
+          />
+          <button
+            type="button"
+            onPointerDown={handleMicPointerDown}
+            onPointerUp={handleMicPointerUp}
+            disabled={sending || sendingVoice}
+            title="Tap to record & auto-send voice message (or hold and release)"
+            aria-label="Record and send voice message automatically"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-slate-100 text-[#172B3A] transition hover:border-[#176B52] hover:bg-emerald-50 hover:text-[#176B52] disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:w-9"
+          >
+            <Mic className="h-4 w-4" />
+          </button>
+          <button
+            type="submit"
+            disabled={sending || sendingVoice || !draft.trim()}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#176B52] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#125641] disabled:cursor-not-allowed disabled:opacity-50 sm:px-3.5"
+          >
+            <Send className="h-3.5 w-3.5" />
+            <span>{sending || sendingVoice ? 'Sending...' : 'Send'}</span>
+          </button>
+        </form>
+      )}
     </div>
   );
 };

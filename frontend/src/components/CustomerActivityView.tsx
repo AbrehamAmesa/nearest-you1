@@ -484,9 +484,8 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                           if (!ptx) return null;
                           return (
                             <p className="font-mono text-[11px] text-[#176B52]">
-                              Split Paid via {ptx.gateway} ({ptx.txRef}) · Provider Net:{' '}
-                              {formatEtb(Number(ptx.providerAmount))} · Platform Commission:{' '}
-                              {formatEtb(Number(ptx.commissionAmount))}
+                              Paid via {ptx.gateway} ({ptx.txRef}) · Total:{' '}
+                              {formatEtb(Number(ptx.grossAmount))}
                             </p>
                           );
                         })()}
@@ -1482,7 +1481,7 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
         open={Boolean(paymentDetailsModal)}
         transaction={paymentDetailsModal?.transaction}
         lookup={paymentDetailsModal?.lookup}
-        viewerRole="PAYER"
+        viewerRole={dbUser?.isAdmin ? 'ADMIN' : 'PAYER'}
         onClose={() => setPaymentDetailsModal(null)}
       />
     </div>

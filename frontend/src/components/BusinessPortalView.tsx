@@ -3286,8 +3286,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                 </h2>
                 <p className="mt-1 text-xs text-[#172B3A]/65">
                   Configure your business&apos;s own Ethiopian bank, Telebirr, and Payo details so
-                  net sales settle directly to you via Chapa &amp; Payo while platform commission
-                  collects in the platform commission account.
+                  your sales settle directly to your account via Chapa &amp; Payo.
                 </p>
               </div>
 
@@ -3447,11 +3446,12 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                 <div>
                   <h2 className="flex items-center gap-2 font-display text-lg font-bold text-[#172B3A]">
                     <Wallet className="h-5 w-5 text-[#176B52]" />
-                    Chapa &amp; Payo Split Settlement Ledger ({paymentTransactions.length})
+                    Chapa &amp; Payo Settlement Ledger ({paymentTransactions.length})
                   </h2>
                   <p className="mt-0.5 text-xs text-[#172B3A]/65">
-                    Shows net sales routed to your own account vs. platform commission routed to the
-                    single platform account.
+                    {isAdmin || dbUser?.isAdmin
+                      ? 'Shows net sales routed to provider accounts and platform commission collected.'
+                      : 'Shows verified payouts and net sales routed directly to your own account.'}
                   </p>
                 </div>
               </div>
@@ -3483,10 +3483,12 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                         <p className="font-mono text-[11px] text-[#176B52]">
                           Your Net: {formatEtb(Number(ptx.providerAmount))} ({ptx.providerLegStatus})
                         </p>
-                        <p className="font-mono text-[11px] text-[#172B3A]/65">
-                          Platform Comm: {formatEtb(Number(ptx.commissionAmount))} (
-                          {ptx.commissionLegStatus})
-                        </p>
+                        {(isAdmin || dbUser?.isAdmin) && (
+                          <p className="font-mono text-[11px] text-[#172B3A]/65">
+                            Platform Comm: {formatEtb(Number(ptx.commissionAmount))} (
+                            {ptx.commissionLegStatus})
+                          </p>
+                        )}
                         <div className="pt-1.5">
                           <button
                             type="button"
@@ -3508,9 +3510,11 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                           <th className="px-3 py-2.5 font-semibold">Tx Ref &amp; Order</th>
                           <th className="px-3 py-2.5 font-semibold">Gateway</th>
                           <th className="px-3 py-2.5 font-semibold text-right">Gross</th>
-                          <th className="px-3 py-2.5 font-semibold text-right">
-                            Platform Commission
-                          </th>
+                          {(isAdmin || dbUser?.isAdmin) && (
+                            <th className="px-3 py-2.5 font-semibold text-right">
+                              Platform Commission
+                            </th>
+                          )}
                           <th className="px-3 py-2.5 font-semibold text-right">Your Net Sales</th>
                           <th className="px-3 py-2.5 font-semibold">Status</th>
                           <th className="px-3 py-2.5 font-semibold text-right">Receipt</th>
@@ -3536,12 +3540,14 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                             <td className="px-3 py-2.5 text-right font-mono tabular-nums">
                               {formatEtb(Number(ptx.grossAmount))}
                             </td>
-                            <td className="px-3 py-2.5 text-right font-mono tabular-nums text-[#172B3A]/75">
-                              <p>{formatEtb(Number(ptx.commissionAmount))}</p>
-                              <p className="text-[10px] text-[#172B3A]/50">
-                                {ptx.commissionLegStatus}
-                              </p>
-                            </td>
+                            {(isAdmin || dbUser?.isAdmin) && (
+                              <td className="px-3 py-2.5 text-right font-mono tabular-nums text-[#172B3A]/75">
+                                <p>{formatEtb(Number(ptx.commissionAmount))}</p>
+                                <p className="text-[10px] text-[#172B3A]/50">
+                                  {ptx.commissionLegStatus}
+                                </p>
+                              </td>
+                            )}
                             <td className="px-3 py-2.5 text-right font-mono font-bold tabular-nums text-[#176B52]">
                               <p>{formatEtb(Number(ptx.providerAmount))}</p>
                               <p className="text-[10px] font-normal text-[#176B52]">
@@ -3611,7 +3617,7 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
         open={Boolean(paymentDetailsModal)}
         transaction={paymentDetailsModal?.transaction}
         lookup={paymentDetailsModal?.lookup}
-        viewerRole="RECEIVER"
+        viewerRole={isAdmin || dbUser?.isAdmin ? 'ADMIN' : 'RECEIVER'}
         onClose={() => setPaymentDetailsModal(null)}
       />
     </div>

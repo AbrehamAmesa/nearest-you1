@@ -494,8 +494,8 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
                 Your Own Sales &amp; Earnings Collection Account
               </p>
               <p className="text-[11px] text-[#172B3A]/75">
-                Net proceeds from your deliveries, rides, or individual services settle directly into
-                this account while platform commission goes to the platform account.
+                Earnings from your deliveries, rides, or individual services settle into this
+                account via Chapa &amp; Payo.
               </p>
               {dbUser?.chapaSubaccountId && (
                 <p className="font-mono text-[11px] font-semibold text-[#176B52]">

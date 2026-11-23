@@ -45,6 +45,15 @@ public class Message {
     @Column(nullable = false, columnDefinition = "text")
     private String body;
 
+    @Column(name = "message_type", length = 24)
+    private String messageType = "TEXT";
+
+    @Column(name = "audio_data_url", columnDefinition = "text")
+    private String audioDataUrl;
+
+    @Column(name = "audio_duration_seconds")
+    private Integer audioDurationSeconds;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
@@ -80,6 +89,15 @@ public class Message {
 
     public String getBody() { return body; }
     public void setBody(String body) { this.body = body; }
+
+    public String getMessageType() { return messageType; }
+    public void setMessageType(String messageType) { this.messageType = messageType; }
+
+    public String getAudioDataUrl() { return audioDataUrl; }
+    public void setAudioDataUrl(String audioDataUrl) { this.audioDataUrl = audioDataUrl; }
+
+    public Integer getAudioDurationSeconds() { return audioDurationSeconds; }
+    public void setAudioDurationSeconds(Integer audioDurationSeconds) { this.audioDurationSeconds = audioDurationSeconds; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

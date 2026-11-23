@@ -238,9 +238,11 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
     }
   };
 
+  const isAdminViewer = Boolean(dbUser?.isAdmin);
   const providerAcc = currentTx?.providerPayoutAccountSnapshot;
-  const commissionAcc =
-    currentTx?.platformCommissionAccountSnapshot || gatewayConfig?.platformCommissionAccount;
+  const commissionAcc = isAdminViewer
+    ? currentTx?.platformCommissionAccountSnapshot || gatewayConfig?.platformCommissionAccount
+    : null;
   const chapaEnabled = gatewayConfig?.gateways?.chapa?.enabled !== false;
   const payoEnabled = gatewayConfig?.gateways?.payo?.enabled !== false;
 
@@ -254,7 +256,7 @@ export const PaymentGatewayModal: React.FC<PaymentGatewayModalProps> = ({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Chapa and Payo Split Payment Checkout"
+        aria-label="Chapa and Payo Payment Checkout"
         className="w-full max-w-2xl rounded-2xl border border-[#172B3A]/15 bg-white shadow-2xl my-auto overflow-hidden"
       >
         {/* Header */}
@@ -384,8 +386,8 @@ Customer pays by bank transfer; Payo verifies the receipt and notifies Nearest Y
             <>
               {selectedGateway === 'CHAPA' && (
                 <>
-              {/* Chapa provider / platform account breakdown */}
-              <div className="grid gap-3 sm:grid-cols-2">
+              {/* Chapa settlement breakdown */}
+              <div className={`grid gap-3 ${isAdminViewer ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
                 {/* Leg 1: Service Provider's Own Account */}
                 <div className="rounded-xl border border-[#176B52]/25 bg-emerald-50/40 p-3.5 space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -394,7 +396,11 @@ Customer pays by bank transfer; Payo verifies the receipt and notifies Nearest Y
                       Service Provider Own Account
                     </span>
                     <span className="font-mono text-sm font-bold text-[#172B3A]">
-                      {formatEtb(Number(currentTx.providerAmount))}
+                      {formatEtb(
+                        isAdminViewer
+                          ? Number(currentTx.providerAmount)
+                          : Number(currentTx.grossAmount)
+                      )}
                     </span>
                   </div>
 
@@ -457,67 +463,69 @@ Customer pays by bank transfer; Payo verifies the receipt and notifies Nearest Y
                   </div>
                 </div>
 
-                {/* Leg 2: Single Platform Commission Account */}
-                <div className="rounded-xl border border-[#172B3A]/15 bg-[#F4F6F5]/70 p-3.5 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#172B3A]">
-                      <Landmark className="h-3.5 w-3.5 text-[#C88A1E]" />
-                      Platform Commission Account
-                    </span>
-                    <span className="font-mono text-sm font-bold text-[#172B3A]">
-                      {formatEtb(Number(currentTx.commissionAmount))}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1 text-[11px] text-[#172B3A]/80">
-                    <p className="font-semibold text-[#172B3A]">
-                      {commissionAcc?.accountHolderName || 'Nearest You Platform Commission Pool'}
-                    </p>
-                    <p>
-                      Bank:{' '}
-                      <span className="font-medium">
-                        {commissionAcc?.bankName || 'Commercial Bank of Ethiopia (CBE)'}
+                {/* Leg 2: Single Platform Commission Account (Admin Only) */}
+                {isAdminViewer && (
+                  <div className="rounded-xl border border-[#172B3A]/15 bg-[#F4F6F5]/70 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#172B3A]">
+                        <Landmark className="h-3.5 w-3.5 text-[#C88A1E]" />
+                        Platform Commission Account
                       </span>
-                    </p>
-                    {commissionAcc?.accountNumber && (
-                      <div className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1 font-mono text-[11px]">
-                        <span>Acct: {commissionAcc.accountNumber}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy('plat-acct', commissionAcc.accountNumber)}
-                          className="text-[#176B52]"
-                        >
-                          {copiedKey === 'plat-acct' ? (
-                            <Check className="h-3.5 w-3.5" />
-                          ) : (
-                            <Copy className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                      </div>
-                    )}
-                    {commissionAcc?.telebirrNumber && (
-                      <div className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1 font-mono text-[11px]">
-                        <span>Telebirr: {commissionAcc.telebirrNumber}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy('plat-tel', commissionAcc.telebirrNumber)}
-                          className="text-[#176B52]"
-                        >
-                          {copiedKey === 'plat-tel' ? (
-                            <Check className="h-3.5 w-3.5" />
-                          ) : (
-                            <Copy className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                      </div>
-                    )}
-                    {commissionAcc?.payoAccountHandle && (
-                      <p className="font-mono text-[10px] text-[#172B3A]/70">
-                        Payo Pool Handle: {commissionAcc.payoAccountHandle}
+                      <span className="font-mono text-sm font-bold text-[#172B3A]">
+                        {formatEtb(Number(currentTx.commissionAmount))}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 text-[11px] text-[#172B3A]/80">
+                      <p className="font-semibold text-[#172B3A]">
+                        {commissionAcc?.accountHolderName || 'Nearest You Platform Commission Pool'}
                       </p>
-                    )}
+                      <p>
+                        Bank:{' '}
+                        <span className="font-medium">
+                          {commissionAcc?.bankName || 'Commercial Bank of Ethiopia (CBE)'}
+                        </span>
+                      </p>
+                      {commissionAcc?.accountNumber && (
+                        <div className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1 font-mono text-[11px]">
+                          <span>Acct: {commissionAcc.accountNumber}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy('plat-acct', commissionAcc.accountNumber)}
+                            className="text-[#176B52]"
+                          >
+                            {copiedKey === 'plat-acct' ? (
+                              <Check className="h-3.5 w-3.5" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      )}
+                      {commissionAcc?.telebirrNumber && (
+                        <div className="flex items-center justify-between gap-2 rounded bg-white px-2 py-1 font-mono text-[11px]">
+                          <span>Telebirr: {commissionAcc.telebirrNumber}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy('plat-tel', commissionAcc.telebirrNumber)}
+                            className="text-[#176B52]"
+                          >
+                            {copiedKey === 'plat-tel' ? (
+                              <Check className="h-3.5 w-3.5" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      )}
+                      {commissionAcc?.payoAccountHandle && (
+                        <p className="font-mono text-[10px] text-[#172B3A]/70">
+                          Payo Pool Handle: {commissionAcc.payoAccountHandle}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
                 </>

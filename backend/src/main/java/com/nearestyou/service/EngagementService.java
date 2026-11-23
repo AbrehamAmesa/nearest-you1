@@ -323,9 +323,38 @@ public class EngagementService {
 
     @Transactional
     public Message sendMessage(UserPrincipal principal, SendMessageRequest req) {
-        String body = req.body() != null ? req.body().trim() : "";
-        if (body.isEmpty()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Message cannot be empty.");
+        String rawBody = req.body() != null ? req.body().trim() : "";
+        String requestedType = req.messageType() != null && !req.messageType().isBlank()
+                ? req.messageType().trim().toUpperCase(Locale.ROOT)
+                : "TEXT";
+        String audioDataUrl = req.audioDataUrl() != null ? req.audioDataUrl().trim() : "";
+        boolean isVoiceMessage = "VOICE".equals(requestedType) || !audioDataUrl.isEmpty();
+        Integer audioDurationSeconds = null;
+        String body = rawBody;
+
+        if (isVoiceMessage) {
+            if (audioDataUrl.isEmpty()
+                    || !audioDataUrl.regionMatches(true, 0, "data:audio/", 0, "data:audio/".length())
+                    || !audioDataUrl.contains(";base64,")) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Valid audio recording data is required for voice messages.");
+            }
+            if (audioDataUrl.length() > 3_500_000) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Voice recording is too large. Please keep recordings under 60 seconds.");
+            }
+            int duration = req.audioDurationSeconds() != null ? Math.max(0, Math.min(300, req.audioDurationSeconds())) : 0;
+            audioDurationSeconds = duration > 0 ? duration : null;
+            if (body.isEmpty()) {
+                body = duration > 0
+                        ? String.format(Locale.US, "Voice message (%d:%02d)", duration / 60, duration % 60)
+                        : "Voice message";
+            }
+            requestedType = "VOICE";
+        } else {
+            if (body.isEmpty()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Message cannot be empty.");
+            }
+            requestedType = "TEXT";
+            audioDataUrl = null;
         }
 
         String uid = principal.uid();
@@ -448,6 +477,9 @@ public class EngagementService {
         msg.setBookingId(resolvedBookingId);
         msg.setThreadKey(resolvedThreadKey);
         msg.setBody(body);
+        msg.setMessageType(requestedType);
+        msg.setAudioDataUrl(audioDataUrl);
+        msg.setAudioDurationSeconds(audioDurationSeconds);
 
         Message saved = messageRepo.save(msg);
         String ownerUid = biz != null ? biz.getOwnerUid() : null;

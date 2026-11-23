@@ -391,8 +391,11 @@ function NearestYouWorkspace() {
       setNotificationsInboxOpen(false);
 
       if (item.paymentTxRef) {
-        const viewerRole: 'RECEIVER' | 'PAYER' =
-          item.actionTarget === 'activity' ? 'PAYER' : 'RECEIVER';
+        const viewerRole: 'RECEIVER' | 'PAYER' | 'ADMIN' = dbUser?.isAdmin
+          ? 'ADMIN'
+          : item.actionTarget === 'activity'
+            ? 'PAYER'
+            : 'RECEIVER';
         setInspectPaymentModal({
           txRef: item.paymentTxRef,
           viewerRole,
@@ -1444,7 +1447,7 @@ function NearestYouWorkspace() {
             eventId: `payment-settled:${tx.txRef}`,
             kind: 'offer',
             title: `Payment Verified · ${tx.gateway}`,
-            message: `${tx.referenceCode} paid (${Number(tx.grossAmount).toLocaleString()} ETB). Provider sales routed & platform commission collected.`,
+            message: `${tx.referenceCode} paid (${Number(tx.grossAmount).toLocaleString()} ETB). Payment verified and settled.`,
             actionLabel: 'Open Payment Details',
             actionTarget: 'activity',
             targetTab:

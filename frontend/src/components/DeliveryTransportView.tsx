@@ -925,7 +925,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                                     escrowStatus: d.escrowStatus,
                                     createdAt: d.createdAt,
                                   },
-                              viewerRole: 'PAYER',
+                              viewerRole: isAdmin ? 'ADMIN' : 'PAYER',
                             })
                           }
                           className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-[#172B3A]/15 bg-white px-3 py-1.5 text-xs font-semibold text-[#172B3A] hover:bg-[#F4F6F5]"
@@ -1076,8 +1076,9 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                       onClick={() =>
                         setPaymentDetailsModal({
                           deliverySummary: trackedDelivery.paymentDetails,
-                          viewerRole:
-                            trackedDelivery.viewerRole === 'RECEIVER'
+                          viewerRole: isAdmin
+                            ? 'ADMIN'
+                            : trackedDelivery.viewerRole === 'RECEIVER'
                               ? 'PARCEL_RECEIVER'
                               : trackedDelivery.viewerRole === 'SENDER'
                                 ? 'PAYER'
@@ -1452,7 +1453,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                                     escrowStatus: d.escrowStatus,
                                     createdAt: d.createdAt,
                                   },
-                              viewerRole: 'RECEIVER',
+                              viewerRole: isAdmin ? 'ADMIN' : 'RECEIVER',
                             })
                           }
                           className="inline-flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-lg border border-[#176B52]/30 bg-emerald-50/60 px-3 py-2 font-semibold text-[#176B52] hover:bg-emerald-100"
@@ -1635,7 +1636,7 @@ export const DeliveryTransportView: React.FC<DeliveryTransportViewProps> = ({
                                           escrowStatus: d.escrowStatus,
                                           createdAt: d.createdAt,
                                         },
-                                    viewerRole: 'RECEIVER',
+                                    viewerRole: isAdmin ? 'ADMIN' : 'RECEIVER',
                                   })
                                 }
                                 className="inline-flex min-h-[38px] items-center gap-1 rounded-md border border-[#176B52]/30 bg-emerald-50/60 px-2.5 py-1.5 font-semibold text-[#176B52] hover:bg-emerald-100"

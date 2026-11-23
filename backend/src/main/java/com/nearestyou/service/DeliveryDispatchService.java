@@ -151,7 +151,7 @@ public class DeliveryDispatchService {
         map.put("conflictCategory", d.getConflictCategory());
         map.put("conflictResolution", d.getConflictResolution());
         map.put("paymentMethod", d.getPaymentMethod());
-        map.put("paymentDetails", buildDeliveryPaymentSummary(d, isAdmin || isSender || isDriver));
+        map.put("paymentDetails", buildDeliveryPaymentSummary(d, isAdmin || isSender || isDriver, isAdmin));
         map.put("pickupOtp", (isSender || isAdmin) ? d.getPickupOtp() : null);
         map.put("deliveryOtp", (isSender || isAdmin || phoneMatches) ? d.getDeliveryOtp() : null);
         map.put("viewerRole", isAdmin ? "ADMIN" : isSender ? "SENDER" : isDriver ? "DRIVER" : "RECEIVER");
@@ -565,14 +565,19 @@ public class DeliveryDispatchService {
         boolean includeSplits = principal != null && (principal.isAdmin()
                 || d.getCustomerUid().equals(principal.uid())
                 || principal.uid().equals(d.getDriverUid()));
-        map.put("paymentDetails", buildDeliveryPaymentSummary(d, includeSplits));
+        boolean isAdminViewer = principal != null && principal.isAdmin();
+        map.put("paymentDetails", buildDeliveryPaymentSummary(d, includeSplits, isAdminViewer));
         map.put("distanceToPickupKm", distanceToPickupKm);
         map.put("status", d.getStatus());
         map.put("createdAt", d.getCreatedAt());
         return map;
     }
 
-    private Map<String, Object> buildDeliveryPaymentSummary(DeliveryRequest d, boolean includeInternalSplits) {
+    private Map<String, Object> buildDeliveryPaymentSummary(
+            DeliveryRequest d,
+            boolean includeInternalSplits,
+            boolean isAdminViewer
+    ) {
         String txType = d.getRequestType() != null ? d.getRequestType().toUpperCase(Locale.ROOT) : "DELIVERY";
         List<PaymentTransaction> txs = paymentRepo.findByTransactionTypeAndReferenceIdOrderByCreatedAtDesc(txType, d.getId());
         PaymentTransaction ptx = txs.stream()
@@ -604,14 +609,16 @@ public class DeliveryDispatchService {
         summary.put("receiverName", d.getReceiverName());
         summary.put("referenceCode", d.getTrackingCode());
         if (includeInternalSplits && ptx != null) {
-            summary.put("commissionAmount", ptx.getCommissionAmount());
             summary.put("providerAmount", ptx.getProviderAmount());
-            summary.put("commissionLegStatus", ptx.getCommissionLegStatus());
             summary.put("providerLegStatus", ptx.getProviderLegStatus());
             summary.put("payerReceiptImageUrl", ptx.getPayerReceiptImageUrl());
             summary.put("customerEmail", ptx.getCustomerEmail());
             summary.put("providerPayoutAccountSnapshot", ptx.getProviderPayoutAccountSnapshot());
-            summary.put("platformCommissionAccountSnapshot", ptx.getPlatformCommissionAccountSnapshot());
+            if (isAdminViewer) {
+                summary.put("commissionAmount", ptx.getCommissionAmount());
+                summary.put("commissionLegStatus", ptx.getCommissionLegStatus());
+                summary.put("platformCommissionAccountSnapshot", ptx.getPlatformCommissionAccountSnapshot());
+            }
         }
         return summary;
     }

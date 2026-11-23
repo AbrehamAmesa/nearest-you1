@@ -230,12 +230,20 @@ public class PaymentGatewayService {
 
     @Transactional(readOnly = true)
     public Map<String, Object> getPublicPaymentConfig() {
+        return getPublicPaymentConfig(null);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getPublicPaymentConfig(UserPrincipal principal) {
         Map<String, Object> platformAcc = getPlatformCommissionAccountSnapshot();
         boolean chapaEnabled = !(platformAcc.get("chapaEnabled") instanceof Boolean b) || b;
         boolean payoEnabled = !(platformAcc.get("payoEnabled") instanceof Boolean b2) || b2;
+        boolean isAdmin = principal != null && principal.isAdmin();
 
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("platformCommissionAccount", platformAcc);
+        if (isAdmin) {
+            out.put("platformCommissionAccount", platformAcc);
+        }
         out.put("banks", getEthiopianBanks());
         out.put("gateways", Map.of(
                 "chapa", Map.of(
@@ -250,6 +258,25 @@ public class PaymentGatewayService {
                 )
         ));
         return out;
+    }
+
+    private BigDecimal resolveDefaultCommissionFraction() {
+        Map<String, Object> policy = settingRepo.findBySettingKey("pricing_policy")
+                .map(PlatformSetting::getSettingValue)
+                .orElse(Map.of());
+        double pct = 10.0;
+        Object raw = policy.get("defaultCommissionPercent");
+        if (raw instanceof Number n) {
+            pct = n.doubleValue();
+        } else if (raw != null) {
+            try {
+                pct = Double.parseDouble(String.valueOf(raw));
+            } catch (NumberFormatException ignored) {
+                pct = 10.0;
+            }
+        }
+        if (pct < 0 || pct > 50) pct = 10.0;
+        return BigDecimal.valueOf(pct).divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
     }
 
     @Transactional
@@ -426,9 +453,10 @@ public class PaymentGatewayService {
             taxAmount = order.getTaxAmount();
 
             CommissionRecord cr = commissionRepo.findByTransactionRef(referenceCode).orElse(null);
+            BigDecimal defaultRate = resolveDefaultCommissionFraction();
             commissionAmount = cr != null && cr.getCommissionAmount() != null
                     ? cr.getCommissionAmount()
-                    : grossAmount.multiply(new BigDecimal("0.10")).setScale(2, RoundingMode.HALF_UP);
+                    : grossAmount.multiply(defaultRate).setScale(2, RoundingMode.HALF_UP);
             providerAmount = cr != null && cr.getProviderAmount() != null
                     ? cr.getProviderAmount()
                     : grossAmount.subtract(commissionAmount).setScale(2, RoundingMode.HALF_UP);
@@ -484,9 +512,10 @@ public class PaymentGatewayService {
             grossAmount = booking.getAgreedPrice();
 
             CommissionRecord cr = commissionRepo.findByTransactionRef(referenceCode).orElse(null);
+            BigDecimal defaultRate = resolveDefaultCommissionFraction();
             commissionAmount = cr != null && cr.getCommissionAmount() != null
                     ? cr.getCommissionAmount()
-                    : grossAmount.multiply(new BigDecimal("0.10")).setScale(2, RoundingMode.HALF_UP);
+                    : grossAmount.multiply(defaultRate).setScale(2, RoundingMode.HALF_UP);
             providerAmount = cr != null && cr.getProviderAmount() != null
                     ? cr.getProviderAmount()
                     : grossAmount.subtract(commissionAmount).setScale(2, RoundingMode.HALF_UP);
@@ -520,9 +549,10 @@ public class PaymentGatewayService {
             taxAmount = delivery.getTaxAmount();
 
             CommissionRecord cr = commissionRepo.findByTransactionRef(referenceCode).orElse(null);
+            BigDecimal defaultRate = resolveDefaultCommissionFraction();
             commissionAmount = cr != null && cr.getCommissionAmount() != null
                     ? cr.getCommissionAmount()
-                    : grossAmount.multiply(new BigDecimal("0.10")).setScale(2, RoundingMode.HALF_UP);
+                    : grossAmount.multiply(defaultRate).setScale(2, RoundingMode.HALF_UP);
             providerAmount = cr != null && cr.getProviderAmount() != null
                     ? cr.getProviderAmount()
                     : grossAmount.subtract(commissionAmount).subtract(taxAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
