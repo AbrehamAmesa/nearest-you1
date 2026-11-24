@@ -127,6 +127,8 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
   const [editCompanyLogoUrl, setEditCompanyLogoUrl] = useState('');
   const [editDeliveryAvailable, setEditDeliveryAvailable] = useState(true);
   const [editFreeDeliveryMaxKm, setEditFreeDeliveryMaxKm] = useState('0');
+  const [editTaxResponsibility, setEditTaxResponsibility] = useState<'SELLER' | 'BUYER'>('BUYER');
+  const [editTaxConfirmed, setEditTaxConfirmed] = useState(true);
   const [editImmediateAcceptance, setEditImmediateAcceptance] = useState(true);
   const [editEstimatedReadyMinutes, setEditEstimatedReadyMinutes] = useState('15');
   const [editEstimatedDeliveryMinutes, setEditEstimatedDeliveryMinutes] = useState('45');
@@ -174,6 +176,8 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
     setEditCompanyLogoUrl(listing.metadata?.companyLogoUrl || '');
     setEditDeliveryAvailable(pol.deliveryAvailable);
     setEditFreeDeliveryMaxKm(String(pol.freeDeliveryMaxKm || 0));
+    setEditTaxResponsibility(pol.taxResponsibility);
+    setEditTaxConfirmed(pol.taxConfirmedBySeller);
     setEditImmediateAcceptance(pol.immediateAcceptance);
     setEditEstimatedReadyMinutes(String(pol.estimatedReadyMinutes));
     setEditEstimatedDeliveryMinutes(String(pol.estimatedDeliveryMinutes));
@@ -460,12 +464,18 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
       safeMeta.companyLogoUrl = editCompanyLogoUrl.trim() || undefined;
     }
     if (isCartItem) {
+      if (!editTaxConfirmed) {
+        setEditError('Please confirm whether tax is covered by the seller or added for the buyer before saving.');
+        return;
+      }
       const readyMin = Math.max(5, Math.round(Number(editEstimatedReadyMinutes) || 15));
       const delivMin = Math.max(readyMin, Math.round(Number(editEstimatedDeliveryMinutes) || 45));
       safeMeta.deliveryAvailable = editDeliveryAvailable;
       safeMeta.freeDeliveryMaxKm = editDeliveryAvailable
         ? Math.max(0, Number(editFreeDeliveryMaxKm) || 0)
         : 0;
+      safeMeta.taxResponsibility = editTaxResponsibility;
+      safeMeta.taxConfirmedBySeller = true;
       safeMeta.immediateAcceptance =
         listing.listingType === 'FOOD' ? false : editImmediateAcceptance;
       safeMeta.estimatedReadyMinutes = readyMin;
@@ -1284,6 +1294,79 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                           </div>
                         )}
 
+                        <div className="space-y-2 rounded-lg border border-[#F4A62A]/45 bg-amber-50/50 p-2.5">
+                          <p className="text-[11px] font-bold text-[#172B3A]">
+                            Tax Responsibility (Seller Must Confirm First)
+                          </p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <label
+                              className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 transition-colors ${
+                                editTaxResponsibility === 'SELLER'
+                                  ? 'border-[#176B52] bg-emerald-50/70'
+                                  : 'border-[#172B3A]/15 bg-white'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="editTaxResponsibility"
+                                checked={editTaxResponsibility === 'SELLER'}
+                                onChange={() => {
+                                  setEditTaxResponsibility('SELLER');
+                                  setEditTaxConfirmed(false);
+                                }}
+                                className="mt-0.5 accent-[#176B52]"
+                              />
+                              <div>
+                                <p className="text-[11px] font-bold text-[#172B3A]">
+                                  Tax from Seller (Included)
+                                </p>
+                                <p className="text-[10px] text-[#172B3A]/70">
+                                  Buyer pays only the visible amount; no tax added.
+                                </p>
+                              </div>
+                            </label>
+                            <label
+                              className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 transition-colors ${
+                                editTaxResponsibility === 'BUYER'
+                                  ? 'border-[#176B52] bg-emerald-50/70'
+                                  : 'border-[#172B3A]/15 bg-white'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="editTaxResponsibility"
+                                checked={editTaxResponsibility === 'BUYER'}
+                                onChange={() => {
+                                  setEditTaxResponsibility('BUYER');
+                                  setEditTaxConfirmed(false);
+                                }}
+                                className="mt-0.5 accent-[#176B52]"
+                              />
+                              <div>
+                                <p className="text-[11px] font-bold text-[#172B3A]">
+                                  Tax from Buyer (Added)
+                                </p>
+                                <p className="text-[10px] text-[#172B3A]/70">
+                                  VAT added on top of visible price at checkout.
+                                </p>
+                              </div>
+                            </label>
+                          </div>
+                          <label className="flex cursor-pointer items-start gap-2 text-[11px] font-semibold text-[#172B3A]">
+                            <input
+                              type="checkbox"
+                              checked={editTaxConfirmed}
+                              onChange={(e) => setEditTaxConfirmed(e.target.checked)}
+                              className="mt-0.5 h-3.5 w-3.5 accent-[#176B52]"
+                            />
+                            <span>
+                              {editTaxResponsibility === 'SELLER'
+                                ? 'I confirm tax is from the seller (buyer pays only visible amount, no tax added).'
+                                : 'I confirm tax is from the buyer (VAT added at checkout).'}
+                            </span>
+                          </label>
+                        </div>
+
                         <div className="space-y-2 border-t border-[#172B3A]/10 pt-2.5">
                           <label className="block text-[11px] font-medium text-[#172B3A]/75">
                             If Buyer Is Unsatisfied (Returnability)
@@ -1502,6 +1585,14 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                               </span>
                             </div>
                             <div className="flex justify-between gap-2">
+                              <span className="text-[#172B3A]/65">Tax / VAT</span>
+                              <span className="font-semibold text-[#172B3A]">
+                                {pol.taxResponsibility === 'SELLER'
+                                  ? 'From Seller (Buyer pays visible amount only)'
+                                  : 'From Buyer (+VAT added at checkout)'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between gap-2">
                               <span className="text-[#172B3A]/65">Return if Unsatisfied</span>
                               <span className="font-semibold text-[#172B3A]">
                                 {pol.returnable
@@ -1543,7 +1634,7 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                         return (
                           <div className="space-y-2 rounded-xl border border-[#172B3A]/12 bg-white p-3.5 text-xs">
                             <p className="font-bold text-[#172B3A]">
-                              Delivery, Acceptance &amp; Unsatisfied Return Disclosure
+                              Delivery, Tax, Acceptance &amp; Unsatisfied Return Disclosure
                             </p>
                             <div className="space-y-1 text-[#172B3A]/80">
                               <p>
@@ -1555,6 +1646,12 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                                         : 'Buyer pays distance delivery fee'
                                     }`
                                   : `Without Delivery (Store Pickup Only at ${business.landmark}, ${business.subCity}) · Ready in ~${pol.estimatedReadyMinutes} min`}
+                              </p>
+                              <p>
+                                <strong className="text-[#172B3A]">Tax / VAT:</strong>{' '}
+                                {pol.taxResponsibility === 'SELLER'
+                                  ? 'Tax is covered by Seller — Buyer pays only the visible price (no extra tax added at checkout).'
+                                  : 'Tax is paid by Buyer — Platform VAT is added on top of the visible price at checkout.'}
                               </p>
                               <p>
                                 <strong className="text-[#172B3A]">Order Acceptance:</strong>{' '}
@@ -1629,7 +1726,10 @@ export const ListingDetailModal: React.FC<ListingDetailModalProps> = ({
                         }}
                         className="w-full min-h-[44px] rounded-lg bg-[#176B52] px-5 py-3 text-sm font-semibold text-white hover:bg-[#125641]"
                       >
-                        Add to Cart · {formatEtb(listing.discountPrice || listing.basePrice)}
+                        Add to Cart · {formatEtb(listing.discountPrice || listing.basePrice)}{' '}
+                        {getListingPolicy(listing).taxResponsibility === 'SELLER'
+                          ? '(No extra tax)'
+                          : '(+VAT)'}
                       </button>
                     </div>
                   )}

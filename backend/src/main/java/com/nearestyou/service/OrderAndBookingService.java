@@ -92,6 +92,11 @@ public class OrderAndBookingService {
 
             BigDecimal subtotal = BigDecimal.ZERO;
             BigDecimal totalDiscount = BigDecimal.ZERO;
+            BigDecimal buyerTaxSubtotal = BigDecimal.ZERO;
+            BigDecimal netTaxableForMor = BigDecimal.ZERO;
+            BigDecimal vatForMor = BigDecimal.ZERO;
+            int sellerTaxItems = 0;
+            int buyerTaxItems = 0;
             List<Map<String, Object>> snapshot = new ArrayList<>();
 
             boolean isFoodOrder = "FOOD".equalsIgnoreCase(group.orderType());
@@ -180,6 +185,23 @@ public class OrderAndBookingService {
                 if (listing.getDiscountPrice() != null) {
                     totalDiscount = totalDiscount.add(origPrice.subtract(activePrice).multiply(qty));
                 }
+                String itemTaxResp = "SELLER".equalsIgnoreCase(String.valueOf(meta.get("taxResponsibility")))
+                        ? "SELLER"
+                        : "BUYER";
+                if ("SELLER".equals(itemTaxResp)) {
+                    sellerTaxItems++;
+                    BigDecimal divisor = BigDecimal.ONE.add(BigDecimal.valueOf(taxRate / 100.0));
+                    BigDecimal netLine = divisor.compareTo(BigDecimal.ZERO) > 0
+                            ? lineTotal.divide(divisor, 2, RoundingMode.HALF_UP)
+                            : lineTotal;
+                    netTaxableForMor = netTaxableForMor.add(netLine);
+                    vatForMor = vatForMor.add(lineTotal.subtract(netLine).max(BigDecimal.ZERO));
+                } else {
+                    buyerTaxItems++;
+                    buyerTaxSubtotal = buyerTaxSubtotal.add(lineTotal);
+                    netTaxableForMor = netTaxableForMor.add(lineTotal);
+                    vatForMor = vatForMor.add(lineTotal.multiply(BigDecimal.valueOf(taxRate / 100.0)));
+                }
                 Map<String, Object> snap = new LinkedHashMap<>();
                 snap.put("listingId", listing.getId());
                 snap.put("title", listing.getTitle());
@@ -189,6 +211,7 @@ public class OrderAndBookingService {
                 snap.put("lineTotal", lineTotal);
                 snap.put("deliveryAvailable", itemDeliveryAvailable);
                 snap.put("freeDeliveryMaxKm", itemFreeMaxKm);
+                snap.put("taxResponsibility", itemTaxResp);
                 snap.put("returnable", itemReturnable);
                 snap.put("returnLossPercent", lossPct);
                 snap.put("returnLossFixedEtb", lossFixed);
@@ -205,8 +228,11 @@ public class OrderAndBookingService {
                     deliveryFee = group.deliveryFee().max(BigDecimal.ZERO);
                 }
             }
-            BigDecimal taxAmount = subtotal.multiply(BigDecimal.valueOf(taxRate / 100.0)).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal taxAmount = buyerTaxSubtotal.multiply(BigDecimal.valueOf(taxRate / 100.0)).setScale(2, RoundingMode.HALF_UP);
             BigDecimal totalAmount = subtotal.add(deliveryFee).add(taxAmount).setScale(2, RoundingMode.HALF_UP);
+            String groupTaxResponsibility = (sellerTaxItems > 0 && buyerTaxItems > 0)
+                    ? "MIXED"
+                    : (sellerTaxItems > 0 ? "SELLER" : "BUYER");
             String orderNumber = "NY-ORD-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
 
             int resolvedReadyMins = maxReadyMinutes != null ? maxReadyMinutes : (isFoodOrder ? 25 : 15);
@@ -225,6 +251,7 @@ public class OrderAndBookingService {
             Map<String, Object> returnPolicySnap = new LinkedHashMap<>();
             returnPolicySnap.put("deliveryAvailable", groupDeliverySupported);
             returnPolicySnap.put("freeDeliveryMaxKm", resolvedFreeKm);
+            returnPolicySnap.put("taxResponsibility", groupTaxResponsibility);
             returnPolicySnap.put("returnable", allReturnable);
             returnPolicySnap.put("returnWindowDays", allReturnable ? minReturnWindowDays : 0);
             returnPolicySnap.put("returnLossPercent", allReturnable ? maxReturnLossPercent : 100.0);
@@ -292,8 +319,8 @@ public class OrderAndBookingService {
             cr.setTransactionType("ORDER");
             cr.setBusinessId(group.businessId());
             cr.setGrossAmount(totalAmount);
-            cr.setTaxableAmount(subtotal.setScale(2, RoundingMode.HALF_UP));
-            cr.setVatAmount(taxAmount);
+            cr.setTaxableAmount(netTaxableForMor.setScale(2, RoundingMode.HALF_UP));
+            cr.setVatAmount(vatForMor.setScale(2, RoundingMode.HALF_UP));
             cr.setWithholdingTaxAmount(whtAmount);
             cr.setCommissionRate(commissionRate);
             cr.setCommissionAmount(commissionAmount);

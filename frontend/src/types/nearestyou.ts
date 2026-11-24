@@ -17,6 +17,8 @@ export interface ListingMetadata {
   durationMinutes?: number;
   deliveryAvailable?: boolean;
   freeDeliveryMaxKm?: number | null;
+  taxResponsibility?: 'SELLER' | 'BUYER' | string | null;
+  taxConfirmedBySeller?: boolean | null;
   immediateAcceptance?: boolean;
   estimatedReadyMinutes?: number;
   estimatedDeliveryMinutes?: number;
@@ -269,6 +271,7 @@ export interface OrderRecord {
     quantity: number;
     unitPrice: number;
     lineTotal: number;
+    taxResponsibility?: 'SELLER' | 'BUYER' | string;
     variant?: string;
   }>;
   subtotal: string;
@@ -292,6 +295,7 @@ export interface OrderRecord {
   returnPolicySnapshot?: {
     deliveryAvailable?: boolean;
     freeDeliveryMaxKm?: number | null;
+    taxResponsibility?: 'SELLER' | 'BUYER' | 'MIXED' | string;
     returnable?: boolean;
     returnWindowDays?: number;
     returnLossPercent?: number;

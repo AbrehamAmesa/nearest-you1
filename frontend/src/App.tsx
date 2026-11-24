@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ShoppingCart } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { TopBar, type AppSection } from './components/TopBar.tsx';
 import { CustomerDiscoverView } from './components/CustomerDiscoverView.tsx';
@@ -16,6 +17,7 @@ import { PaymentDetailsModal } from './components/PaymentDetailsModal.tsx';
 import { PaymentGatewayModal } from './components/PaymentGatewayModal.tsx';
 import type { AppNotification, NotificationKind } from './components/NotificationCenter.tsx';
 import { useLiveChatInboxListener } from './hooks/useLiveChat.ts';
+import { formatEtb } from './utils/geo.ts';
 import type { AppLanguage } from './utils/i18n.ts';
 import { catalogApi, engagementApi, mapsApi, paymentApi, userApi } from './api/index.ts';
 import type {
@@ -204,6 +206,8 @@ function NearestYouWorkspace() {
   const [favoriteIds, setFavoriteIds] = useState<number[]>([]);
 
   const [cartOpen, setCartOpen] = useState(false);
+  const [cartAddedNotice, setCartAddedNotice] = useState<string | null>(null);
+  const cartNoticeTimerRef = useRef<number | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [jobSeekerModalOpen, setJobSeekerModalOpen] = useState(false);
@@ -721,6 +725,13 @@ function NearestYouWorkspace() {
       }
       return [...prev, { listing, business, quantity: 1, variant }];
     });
+    setCartAddedNotice(listing.title);
+    if (cartNoticeTimerRef.current) {
+      window.clearTimeout(cartNoticeTimerRef.current);
+    }
+    cartNoticeTimerRef.current = window.setTimeout(() => {
+      setCartAddedNotice(null);
+    }, 2600);
   };
 
   const handleUpdateQty = (listingId: number, delta: number) => {
@@ -754,6 +765,10 @@ function NearestYouWorkspace() {
   };
 
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
+  const cartSubtotal = cart.reduce(
+    (s, i) => s + Number(i.listing.discountPrice || i.listing.basePrice) * i.quantity,
+    0
+  );
   const comparedListings = listings.filter((l) => compareIds.includes(l.id));
   const activeLocationLabel = detectedLocation.label || detectedLocation.city || 'Addis Ababa';
 
@@ -1141,6 +1156,8 @@ function NearestYouWorkspace() {
         onMarkAllNotificationsRead={markAllNotificationsRead}
         onClearReadNotifications={clearReadNotifications}
         onExecuteNotificationAction={executeNotificationAction}
+        cartCount={cartCount}
+        onOpenCart={() => setCartOpen(true)}
       />
 
       {catalogError && (
@@ -1174,12 +1191,10 @@ function NearestYouWorkspace() {
             isVerifiedProvider={isVerifiedProvider}
             userLat={detectedLocation.lat}
             userLng={detectedLocation.lng}
-            cartCount={cartCount}
             compareIds={compareIds}
             favoriteIds={favoriteIds}
             language={language}
             onRefreshLocation={() => detectExactLocation(true)}
-            onOpenCart={() => setCartOpen(true)}
             onOpenCompare={() => setCompareOpen(true)}
             onToggleCompare={handleToggleCompare}
             onToggleFavorite={handleToggleFavorite}
@@ -1269,6 +1284,33 @@ function NearestYouWorkspace() {
           <p>Fayda ID Verified · Real-Time Service Locations · ETB Currency</p>
         </div>
       </footer>
+
+      {cartCount > 0 && !cartOpen && (
+        <div className="fixed bottom-4 right-4 z-40 sm:bottom-6 sm:right-6">
+          <button
+            type="button"
+            onClick={() => setCartOpen(true)}
+            className="flex items-center gap-3 rounded-xl border border-[#172B3A]/15 bg-[#172B3A] px-4 py-3 text-left text-white shadow-2xl transition-transform hover:-translate-y-0.5 hover:bg-[#1e3749]"
+          >
+            <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#F4A62A] text-[#172B3A]">
+              <ShoppingCart className="h-5 w-5" />
+              <span className="absolute -right-1.5 -top-1.5 inline-flex min-w-[20px] items-center justify-center rounded-md bg-[#176B52] px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums text-white">
+                {cartCount}
+              </span>
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-[#F4A62A]">
+                {cartAddedNotice
+                  ? `Added: ${cartAddedNotice.length > 22 ? `${cartAddedNotice.slice(0, 20)}...` : cartAddedNotice}`
+                  : `${cartCount} ${cartCount === 1 ? 'item' : 'items'} in Cart`}
+              </p>
+              <p className="font-mono text-xs font-semibold tabular-nums text-white">
+                {formatEtb(cartSubtotal)} · Tap to Checkout
+              </p>
+            </div>
+          </button>
+        </div>
+      )}
 
       <CartDrawer
         open={cartOpen}

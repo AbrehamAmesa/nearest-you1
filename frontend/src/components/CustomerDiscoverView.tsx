@@ -15,7 +15,6 @@ import {
   ScanSearch,
   Search,
   ShieldCheck,
-  ShoppingCart,
   SlidersHorizontal,
   SplitSquareHorizontal,
   Star,
@@ -66,12 +65,10 @@ interface CustomerDiscoverViewProps {
   isVerifiedProvider?: boolean;
   userLat: number;
   userLng: number;
-  cartCount: number;
   compareIds: number[];
   favoriteIds: number[];
   language: AppLanguage;
   onRefreshLocation: () => void;
-  onOpenCart: () => void;
   onOpenCompare: () => void;
   onToggleCompare: (id: number) => void;
   onToggleFavorite: (id: number) => void;
@@ -135,12 +132,10 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
   isVerifiedProvider = false,
   userLat,
   userLng,
-  cartCount,
   compareIds,
   favoriteIds,
   language,
   onRefreshLocation,
-  onOpenCart,
   onOpenCompare,
   onToggleCompare,
   onToggleFavorite,
@@ -1046,14 +1041,6 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
               <Scale className="h-3.5 w-3.5 text-[#176B52]" />
               {t.compare} ({compareIds.length}/3)
             </button>
-            <button
-              type="button"
-              onClick={onOpenCart}
-              className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-[#F4A62A] px-4 py-2 text-xs font-bold text-[#172B3A] hover:bg-[#e5981d] whitespace-nowrap shrink-0"
-            >
-              <ShoppingCart className="h-3.5 w-3.5" />
-              {t.cart} ({cartCount})
-            </button>
           </div>
         </div>
 
@@ -1516,6 +1503,12 @@ export const CustomerDiscoverView: React.FC<CustomerDiscoverViewProps> = ({
                                       : pol.immediateAcceptance
                                         ? 'Immediate Accept'
                                         : 'Seller Accept'}
+                                  </span>
+                                  {' · '}
+                                  <span className="font-medium text-[#172B3A]">
+                                    {pol.taxResponsibility === 'SELLER'
+                                      ? 'Tax included (No extra tax)'
+                                      : '+VAT at checkout'}
                                   </span>
                                   {' · '}
                                   <span>{returnText}</span>

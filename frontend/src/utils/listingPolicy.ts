@@ -4,6 +4,8 @@ export interface ListingCommercialPolicy {
   isFood: boolean;
   deliveryAvailable: boolean;
   freeDeliveryMaxKm: number;
+  taxResponsibility: 'SELLER' | 'BUYER';
+  taxConfirmedBySeller: boolean;
   immediateAcceptance: boolean;
   estimatedReadyMinutes: number;
   estimatedDeliveryMinutes: number;
@@ -39,6 +41,10 @@ export function getListingPolicy(listing?: Pick<Listing, 'listingType' | 'metada
 
   const deliveryAvailable = meta.deliveryAvailable !== false;
   const freeDeliveryMaxKm = deliveryAvailable ? toPositiveNumber(meta.freeDeliveryMaxKm, 0) : 0;
+  const rawTaxResp =
+    typeof meta.taxResponsibility === 'string' ? meta.taxResponsibility.toUpperCase() : '';
+  const taxResponsibility: 'SELLER' | 'BUYER' = rawTaxResp === 'SELLER' ? 'SELLER' : 'BUYER';
+  const taxConfirmedBySeller = Boolean(meta.taxConfirmedBySeller);
   const immediateAcceptance = isFood ? false : meta.immediateAcceptance !== false;
   const estimatedReadyMinutes = Math.max(
     5,
@@ -64,6 +70,8 @@ export function getListingPolicy(listing?: Pick<Listing, 'listingType' | 'metada
     isFood,
     deliveryAvailable,
     freeDeliveryMaxKm,
+    taxResponsibility,
+    taxConfirmedBySeller,
     immediateAcceptance,
     estimatedReadyMinutes,
     estimatedDeliveryMinutes,
@@ -75,6 +83,17 @@ export function getListingPolicy(listing?: Pick<Listing, 'listingType' | 'metada
     deliveryFeeNonRefundableOnReturn,
     returnPolicyNote: meta.returnPolicyNote?.trim() || '',
   };
+}
+
+export function calculateCatalogItemBuyerTaxEtb(
+  lineSubtotalEtb: number,
+  taxResponsibility: 'SELLER' | 'BUYER',
+  taxRatePercent: number
+): number {
+  if (taxResponsibility === 'SELLER') return 0;
+  return (
+    Math.round(Math.max(0, lineSubtotalEtb) * (Math.max(0, taxRatePercent) / 100) * 100) / 100
+  );
 }
 
 export function calculateDeliveryFeeForDistance(

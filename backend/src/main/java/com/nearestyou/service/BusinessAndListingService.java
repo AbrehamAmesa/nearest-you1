@@ -201,6 +201,20 @@ public class BusinessAndListingService {
                     req.isUnpaid(),
                     req.pricingFormula()
             );
+            String normalizedType = req.listingType() != null
+                    ? req.listingType().trim().toUpperCase(Locale.ROOT)
+                    : "";
+            if ("PRODUCT".equals(normalizedType) || "FOOD".equals(normalizedType)) {
+                Map<String, Object> m = req.metadata();
+                String taxResp = m != null && m.get("taxResponsibility") != null
+                        ? String.valueOf(m.get("taxResponsibility")).trim().toUpperCase(Locale.ROOT)
+                        : "";
+                boolean taxConfirmed = m != null && Boolean.TRUE.equals(m.get("taxConfirmedBySeller"));
+                if ((!"SELLER".equals(taxResp) && !"BUYER".equals(taxResp)) || !taxConfirmed) {
+                    throw new ApiException(HttpStatus.BAD_REQUEST,
+                            "Please select whether tax is covered by the seller or buyer and confirm it before publishing.");
+                }
+            }
         }
 
         List<String> sanitizedImages = sanitizeImageUrls(req.imageUrls(), req.imageUrl());
@@ -496,7 +510,8 @@ public class BusinessAndListingService {
                 "introVideoUrl", "companyLogoUrl", "variants", "deliveryOptions",
                 "schedule", "capacity", "employmentType", "contractType", "vehicleType",
                 "brand", "sku", "stockQuantity", "prepTimeMinutes", "durationMinutes",
-                "deliveryAvailable", "freeDeliveryMaxKm", "immediateAcceptance", "estimatedReadyMinutes",
+                "deliveryAvailable", "freeDeliveryMaxKm", "taxResponsibility", "taxConfirmedBySeller",
+                "immediateAcceptance", "estimatedReadyMinutes",
                 "estimatedDeliveryMinutes", "deliveryWindowLabel", "returnable",
                 "returnWindowDays", "returnLossPercent", "returnLossFixedEtb",
                 "deliveryFeeNonRefundableOnReturn", "returnPolicyNote"

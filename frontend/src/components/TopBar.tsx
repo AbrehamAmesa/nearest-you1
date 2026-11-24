@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Globe,
   MessageSquare,
+  ShoppingCart,
   Trash2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -28,6 +29,8 @@ interface TopBarProps {
   onMarkAllNotificationsRead: () => void;
   onClearReadNotifications: () => void;
   onExecuteNotificationAction: (item: AppNotification) => void;
+  cartCount?: number;
+  onOpenCart?: () => void;
 }
 
 const LANGUAGE_CODES: Record<AppLanguage, string> = {
@@ -50,9 +53,12 @@ export const TopBar: React.FC<TopBarProps> = ({
   onMarkAllNotificationsRead,
   onClearReadNotifications,
   onExecuteNotificationAction,
+  cartCount = 0,
+  onOpenCart,
 }) => {
   const { firebaseUser, dbUser, isAdmin, openAuthModal } = useAuth();
   const t = TRANSLATIONS[language].nav;
+  const cartLabel = TRANSLATIONS[language].discover.cart;
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const langDropdownRef = useRef<HTMLDivElement>(null);
   const inboxDropdownRef = useRef<HTMLDivElement>(null);
@@ -155,6 +161,30 @@ export const TopBar: React.FC<TopBarProps> = ({
         </nav>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Always-Visible Sticky Header Cart Button */}
+          {onOpenCart && (
+            <button
+              type="button"
+              onClick={onOpenCart}
+              aria-label={`${cartLabel} (${cartCount})`}
+              className={`relative inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-bold transition-colors whitespace-nowrap ${
+                cartCount > 0
+                  ? 'border-[#E09115] bg-[#F4A62A] text-[#172B3A] shadow-xs hover:bg-[#e5981d]'
+                  : 'border-[#172B3A]/15 bg-[#F4F6F5] text-[#172B3A] hover:bg-white'
+              }`}
+            >
+              <ShoppingCart className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">{cartLabel}</span>
+              <span
+                className={`inline-flex min-w-[18px] items-center justify-center rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold tabular-nums ${
+                  cartCount > 0 ? 'bg-[#172B3A] text-white' : 'bg-[#172B3A]/10 text-[#172B3A]'
+                }`}
+              >
+                {cartCount}
+              </span>
+            </button>
+          )}
+
           {/* Persistent Bell & Message Notification Inbox */}
           <div ref={inboxDropdownRef} className="relative">
             <button

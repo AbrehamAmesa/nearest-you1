@@ -474,7 +474,10 @@ export const CustomerActivityView: React.FC<CustomerActivityViewProps> = ({
                             {ord.deliveryAddress})
                           </span>
                           <span className="font-mono tabular-nums">
-                            Delivery {formatEtb(ord.deliveryFee)} + VAT {formatEtb(ord.taxAmount)}
+                            {ord.returnPolicySnapshot?.taxResponsibility === 'SELLER' &&
+                            Number(ord.taxAmount) === 0
+                              ? `Delivery ${formatEtb(ord.deliveryFee)} · Tax from seller (0 ETB added)`
+                              : `Delivery ${formatEtb(ord.deliveryFee)} + VAT ${formatEtb(ord.taxAmount)}`}
                           </span>
                         </div>
                         {(() => {

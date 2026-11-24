@@ -195,6 +195,8 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
   const [introVideoUrl, setIntroVideoUrl] = useState('');
   const [deliveryAvailable, setDeliveryAvailable] = useState(true);
   const [freeDeliveryMaxKm, setFreeDeliveryMaxKm] = useState('0');
+  const [taxResponsibility, setTaxResponsibility] = useState<'SELLER' | 'BUYER' | ''>('');
+  const [taxConfirmed, setTaxConfirmed] = useState(false);
   const [immediateAcceptance, setImmediateAcceptance] = useState(true);
   const [estimatedReadyMinutes, setEstimatedReadyMinutes] = useState('15');
   const [estimatedDeliveryMinutes, setEstimatedDeliveryMinutes] = useState('45');
@@ -610,12 +612,26 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
       metadataPayload.companyLogoUrl = companyLogoUrl.trim();
     }
     if (isProductMode && (listingType === 'PRODUCT' || listingType === 'FOOD')) {
+      if (!taxResponsibility) {
+        setValidationError(
+          'Please select whether tax (VAT) is paid by the seller or added for the buyer.'
+        );
+        return;
+      }
+      if (!taxConfirmed) {
+        setValidationError(
+          'Please confirm your tax responsibility setting first before publishing this advertisement.'
+        );
+        return;
+      }
       const readyMin = Math.max(5, Math.round(Number(estimatedReadyMinutes) || 15));
       const delivMin = Math.max(readyMin, Math.round(Number(estimatedDeliveryMinutes) || 45));
       metadataPayload.deliveryAvailable = deliveryAvailable;
       metadataPayload.freeDeliveryMaxKm = deliveryAvailable
         ? Math.max(0, Number(freeDeliveryMaxKm) || 0)
         : 0;
+      metadataPayload.taxResponsibility = taxResponsibility;
+      metadataPayload.taxConfirmedBySeller = true;
       metadataPayload.immediateAcceptance =
         listingType === 'FOOD' ? false : immediateAcceptance;
       metadataPayload.estimatedReadyMinutes = readyMin;
@@ -697,6 +713,8 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
     setCvFileName('');
     setIntroVideoUrl('');
     setFreeDeliveryMaxKm('0');
+    setTaxResponsibility('');
+    setTaxConfirmed(false);
     setReturnPolicyNote('');
     onRefreshCatalog();
   };
@@ -1930,6 +1948,82 @@ export const BusinessPortalView: React.FC<BusinessPortalViewProps> = ({
                     </p>
                   </div>
                 )}
+
+                <div className="space-y-2 rounded-lg border border-[#F4A62A]/45 bg-amber-50/50 p-3">
+                  <p className="text-[11px] font-bold text-[#172B3A]">
+                    Tax Responsibility (Required — Seller Must Confirm First)
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label
+                      className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-colors ${
+                        taxResponsibility === 'SELLER'
+                          ? 'border-[#176B52] bg-emerald-50/70'
+                          : 'border-[#172B3A]/15 bg-white hover:border-[#172B3A]/30'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="publishTaxResponsibility"
+                        checked={taxResponsibility === 'SELLER'}
+                        onChange={() => {
+                          setTaxResponsibility('SELLER');
+                          setTaxConfirmed(false);
+                        }}
+                        className="mt-0.5 accent-[#176B52]"
+                      />
+                      <div>
+                        <p className="text-[11px] font-bold text-[#172B3A]">
+                          Tax from Seller (Included)
+                        </p>
+                        <p className="text-[10px] text-[#172B3A]/70">
+                          Buyer pays only the visible amount; no tax will be added at checkout.
+                        </p>
+                      </div>
+                    </label>
+                    <label
+                      className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-colors ${
+                        taxResponsibility === 'BUYER'
+                          ? 'border-[#176B52] bg-emerald-50/70'
+                          : 'border-[#172B3A]/15 bg-white hover:border-[#172B3A]/30'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="publishTaxResponsibility"
+                        checked={taxResponsibility === 'BUYER'}
+                        onChange={() => {
+                          setTaxResponsibility('BUYER');
+                          setTaxConfirmed(false);
+                        }}
+                        className="mt-0.5 accent-[#176B52]"
+                      />
+                      <div>
+                        <p className="text-[11px] font-bold text-[#172B3A]">
+                          Tax from Buyer (Added)
+                        </p>
+                        <p className="text-[10px] text-[#172B3A]/70">
+                          VAT is added on top of the visible price at checkout.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-2 pt-1 text-[11px] font-semibold text-[#172B3A]">
+                    <input
+                      type="checkbox"
+                      checked={taxConfirmed}
+                      disabled={!taxResponsibility}
+                      onChange={(e) => setTaxConfirmed(e.target.checked)}
+                      className="mt-0.5 h-3.5 w-3.5 accent-[#176B52]"
+                    />
+                    <span>
+                      {taxResponsibility === 'SELLER'
+                        ? 'I confirm that tax is from the seller: buyer pays only the visible amount and no tax will be added at checkout.'
+                        : taxResponsibility === 'BUYER'
+                          ? 'I confirm that tax is from the buyer: VAT will be added on top of the visible price at checkout.'
+                          : 'Select one of the tax options above, then check here to confirm before publishing.'}
+                    </span>
+                  </label>
+                </div>
 
                 <div className="space-y-2 border-t border-[#172B3A]/10 pt-2">
                   <label className="block text-[11px] font-medium text-[#172B3A]/75">

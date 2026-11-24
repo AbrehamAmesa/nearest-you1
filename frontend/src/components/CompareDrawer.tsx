@@ -183,6 +183,27 @@ export const CompareDrawer: React.FC<CompareDrawerProps> = ({
                   })}
                 </tr>
                 <tr>
+                  <td className="py-3 pr-4 font-medium text-[#172B3A]/65">Tax / VAT</td>
+                  {listings.map((item) => {
+                    const isOrderable = item.listingType === 'PRODUCT' || item.listingType === 'FOOD';
+                    if (!isOrderable) {
+                      return (
+                        <td key={item.id} className="px-4 py-3 text-[#172B3A]/65">
+                          Per Service Agreement
+                        </td>
+                      );
+                    }
+                    const pol = getListingPolicy(item);
+                    return (
+                      <td key={item.id} className="px-4 py-3 text-[#172B3A]">
+                        {pol.taxResponsibility === 'SELLER'
+                          ? 'From Seller (Buyer pays visible amount only)'
+                          : 'From Buyer (+VAT added at checkout)'}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
                   <td className="py-3 pr-4 font-medium text-[#172B3A]/65">If Unsatisfied (Return Loss)</td>
                   {listings.map((item) => {
                     const isOrderable = item.listingType === 'PRODUCT' || item.listingType === 'FOOD';

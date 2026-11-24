@@ -3,6 +3,7 @@ import { Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
 import type { CartItem, OrderRecord, PlatformPolicy } from '../types/nearestyou.ts';
 import { calculateDistanceKm, formatEtb } from '../utils/geo.ts';
 import {
+  calculateCatalogItemBuyerTaxEtb,
   calculateDeliveryFeeForDistance,
   calculateReturnLoss,
   getListingPolicy,
@@ -68,6 +69,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         deliveryCoveredByProvider: boolean;
         deliveryFee: number;
         taxAmount: number;
+        sellerTaxCount: number;
+        buyerTaxCount: number;
+        taxSummaryMode: 'SELLER' | 'BUYER' | 'MIXED';
         total: number;
         isFoodOrder: boolean;
         immediateAcceptance: boolean;
@@ -91,6 +95,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       const lineSub = active * item.quantity;
       const lineSavings = item.listing.discountPrice ? (orig - active) * item.quantity : 0;
       const itemPol = getListingPolicy(item.listing);
+      const lineBuyerTax = calculateCatalogItemBuyerTaxEtb(
+        lineSub,
+        itemPol.taxResponsibility,
+        policy.taxRatePercent
+      );
+      const isSellerTax = itemPol.taxResponsibility === 'SELLER';
 
       if (!existing) {
         const dist = calculateDistanceKm(
@@ -110,7 +120,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           effectiveFulfillment: 'PICKUP',
           deliveryCoveredByProvider: false,
           deliveryFee: 0,
-          taxAmount: 0,
+          taxAmount: lineBuyerTax,
+          sellerTaxCount: isSellerTax ? 1 : 0,
+          buyerTaxCount: isSellerTax ? 0 : 1,
+          taxSummaryMode: isSellerTax ? 'SELLER' : 'BUYER',
           total: 0,
           isFoodOrder: itemPol.isFood,
           immediateAcceptance: !itemPol.isFood && itemPol.immediateAcceptance,
@@ -128,6 +141,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         existing.items.push(item);
         existing.subtotal += lineSub;
         existing.discountSavings += lineSavings;
+        existing.taxAmount += lineBuyerTax;
+        existing.sellerTaxCount += isSellerTax ? 1 : 0;
+        existing.buyerTaxCount += isSellerTax ? 0 : 1;
         existing.deliverySupported = existing.deliverySupported && itemPol.deliveryAvailable;
         existing.freeDeliveryMaxKm = existing.deliverySupported
           ? Math.min(existing.freeDeliveryMaxKm, itemPol.freeDeliveryMaxKm)
@@ -174,7 +190,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         policy
       );
       const deliveryFee = delivCalc.feeEtb;
-      const taxAmount = Math.round(g.subtotal * (policy.taxRatePercent / 100) * 100) / 100;
+      const taxAmount = Math.round(g.taxAmount * 100) / 100;
+      const taxSummaryMode: 'SELLER' | 'BUYER' | 'MIXED' =
+        g.sellerTaxCount > 0 && g.buyerTaxCount > 0
+          ? 'MIXED'
+          : g.sellerTaxCount > 0
+            ? 'SELLER'
+            : 'BUYER';
       const total = Math.round((g.subtotal + deliveryFee + taxAmount) * 100) / 100;
       const returnLoss = calculateReturnLoss(g.subtotal, deliveryFee, g.returnPolicy, 1);
       return {
@@ -183,6 +205,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         deliveryCoveredByProvider: delivCalc.coveredByProvider,
         deliveryFee,
         taxAmount,
+        taxSummaryMode,
         total,
         returnLoss,
       };
@@ -426,8 +449,18 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         </span>
                       </div>
                       <div className="flex justify-between text-[#172B3A]/70">
-                        <span>VAT ({policy.taxRatePercent}%)</span>
-                        <span className="font-mono tabular-nums">{formatEtb(group.taxAmount)}</span>
+                        <span>
+                          {group.taxSummaryMode === 'SELLER'
+                            ? 'Tax / VAT (From Seller — Included in price)'
+                            : group.taxSummaryMode === 'MIXED'
+                              ? `VAT (${policy.taxRatePercent}% on buyer-taxed items)`
+                              : `VAT (${policy.taxRatePercent}% · Paid by buyer)`}
+                        </span>
+                        <span className="font-mono tabular-nums">
+                          {group.taxSummaryMode === 'SELLER'
+                            ? '0.00 ETB (No tax added)'
+                            : formatEtb(group.taxAmount)}
+                        </span>
                       </div>
                       <div className="flex justify-between pt-1 font-semibold text-[#172B3A]">
                         <span>Vendor order total</span>
