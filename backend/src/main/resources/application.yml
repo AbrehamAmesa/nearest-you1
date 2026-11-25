@@ -1,3 +1,4 @@
+
 server:
   port: ${PORT:8080}
   tomcat:
@@ -6,22 +7,25 @@ server:
 spring:
   application:
     name: nearest-you-platform
+
   servlet:
     multipart:
       max-file-size: 15MB
       max-request-size: 20MB
+
   datasource:
-    url: ${JDBC_DATABASE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:nearestyou}}
-    username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:Postgres@1234}
+    url: ${JDBC_DATABASE_URL:jdbc:postgresql://nearest-you-37264.j77.aws-ap-south-1.cockroachlabs.cloud:26257/nearest-you?sslmode=verify-full&sslrootcert=/etc/secrets/root.crt}
+    username: ${DB_USER:nearest-you-sql-user}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
       ddl-auto: update
     open-in-view: false
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+        dialect: org.hibernate.dialect.CockroachDialect
         format_sql: true
 
 nearestyou:
@@ -30,20 +34,26 @@ nearestyou:
     allow-dev-headers: ${ALLOW_DEV_AUTH:false}
     firebase-project-id: ${FIREBASE_PROJECT_ID:nearestyou}
     token-secret: ${AUTH_TOKEN_SECRET:}
+
   maps:
     api-key: ${GOOGLE_MAPS_API_KEY:}
+
   gemini:
     api-key: ${GEMINI_API_KEY:}
+
   payments:
     public-app-base-url: ${PUBLIC_APP_BASE_URL:http://localhost:3000}
     public-api-base-url: ${PUBLIC_API_BASE_URL:http://localhost:8080}
+
     chapa:
       base-url: ${CHAPA_BASE_URL:https://api.chapa.co/v1}
       secret-key: ${CHAPA_SECRET_KEY:}
       webhook-secret: ${CHAPA_WEBHOOK_SECRET:}
+
     payo:
       base-url: ${PAYO_BASE_URL:https://api.pygate.et/v1}
       api-key: ${PAYO_API_KEY:}
+
     allow-sandbox-completion: ${PAYMENTS_ALLOW_SANDBOX_COMPLETION:false}
 
 springdoc:
