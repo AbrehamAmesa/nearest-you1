@@ -1,0 +1,37 @@
+name: nearest_you_mobile
+description: Nearest You mobile client for Ethiopia — Fayda-verified discovery, live GPS, Chapa & Payo payments, delivery escrow dispatch, live chat & voice messaging.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.2.2
+  web_socket_channel: ^3.0.1
+  shared_preferences: ^2.3.3
+  provider: ^6.1.2
+  geolocator: ^13.0.1
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  image_picker: ^1.1.2
+  file_picker: ^8.1.4
+  record: ^5.1.2
+  audioplayers: ^6.1.0
+  path_provider: ^2.1.4
+  mobile_scanner: ^6.0.2
+  qr_flutter: ^4.1.0
+  webview_flutter: ^4.10.0
+  url_launcher: ^6.3.1
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
