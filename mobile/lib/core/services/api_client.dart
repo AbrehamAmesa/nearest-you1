@@ -155,9 +155,17 @@ class ApiClient {
     return Map<String, dynamic>.from(res as Map);
   }
 
+  Map<String, dynamic> _unwrapUserMap(dynamic res) {
+    final map = Map<String, dynamic>.from(res as Map);
+    if (map['user'] is Map) {
+      return Map<String, dynamic>.from(map['user'] as Map);
+    }
+    return map;
+  }
+
   Future<DbUserRecord> getMe() async {
     final res = await _request('GET', '/api/v1/auth/me');
-    return DbUserRecord.fromJson(Map<String, dynamic>.from(res as Map));
+    return DbUserRecord.fromJson(_unwrapUserMap(res));
   }
 
   Future<void> changePassword({
@@ -173,7 +181,7 @@ class ApiClient {
 
   Future<DbUserRecord> updateProfile(Map<String, dynamic> payload) async {
     final res = await _request('PUT', '/api/v1/users/profile', body: payload);
-    return DbUserRecord.fromJson(Map<String, dynamic>.from(res as Map));
+    return DbUserRecord.fromJson(_unwrapUserMap(res));
   }
 
   Future<void> heartbeat() async {
@@ -188,7 +196,7 @@ class ApiClient {
   Future<DbUserRecord> updatePersonalPayoutAccount(
       Map<String, dynamic> payload) async {
     final res = await _request('PUT', '/api/v1/me/payout-account', body: payload);
-    return DbUserRecord.fromJson(Map<String, dynamic>.from(res as Map));
+    return DbUserRecord.fromJson(_unwrapUserMap(res));
   }
 
   // ---------------- Public Catalog & Maps ----------------
@@ -268,16 +276,29 @@ class ApiClient {
     return Map<String, dynamic>.from(res as Map);
   }
 
+  Map<String, dynamic> _unwrapProviderRegMap(dynamic res) {
+    final map = Map<String, dynamic>.from(res as Map);
+    final inner = map['registration'];
+    if (inner is Map) {
+      final innerMap = Map<String, dynamic>.from(inner);
+      if (innerMap['registration'] is Map) {
+        return Map<String, dynamic>.from(innerMap['registration'] as Map);
+      }
+      return innerMap;
+    }
+    return map;
+  }
+
   Future<ProviderRegistration> registerProvider(
       Map<String, dynamic> payload) async {
     final res = await _request('POST', '/api/v1/provider/register',
         body: payload, timeout: const Duration(seconds: 45));
-    return ProviderRegistration.fromJson(Map<String, dynamic>.from(res as Map));
+    return ProviderRegistration.fromJson(_unwrapProviderRegMap(res));
   }
 
   Future<ProviderRegistration> regenerateProviderQr() async {
     final res = await _request('POST', '/api/v1/provider/regenerate-qr');
-    return ProviderRegistration.fromJson(Map<String, dynamic>.from(res as Map));
+    return ProviderRegistration.fromJson(_unwrapProviderRegMap(res));
   }
 
   Future<Map<String, dynamic>> vouchScan(String token) async {
@@ -289,7 +310,9 @@ class ApiClient {
 
   Future<List<ProviderRegistration>> getProviderApprovals() async {
     final res = await _request('GET', '/api/v1/provider/approvals');
-    final list = res is List ? res : [];
+    final list = res is Map && res['registrations'] is List
+        ? res['registrations'] as List
+        : (res is List ? res : const []);
     return list
         .map((e) =>
             ProviderRegistration.fromJson(Map<String, dynamic>.from(e as Map)))
@@ -523,14 +546,14 @@ class ApiClient {
 
   // ---------------- Engagement: Favorites, Notifications, Chat, Voice, Contracts, Jobs, Reviews ----------------
 
-  Future<List<int>> toggleFavorite(int listingId) async {
+  Future<bool?> toggleFavorite(int listingId) async {
     final res = await _request('POST', '/api/v1/favorites/toggle', body: {
       'listingId': listingId,
     });
-    if (res is Map && res['favoriteIds'] is List) {
-      return (res['favoriteIds'] as List).map((e) => parseInt(e)).toList();
+    if (res is Map && res.containsKey('saved')) {
+      return parseBool(res['saved']);
     }
-    return const [];
+    return null;
   }
 
   Future<List<PendingNotificationItem>> getPendingNotifications() async {

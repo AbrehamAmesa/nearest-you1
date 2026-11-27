@@ -100,5 +100,79 @@ void main() {
       expect(voiceMsg.isVoice, true);
       expect(voiceMsg.audioDurationSeconds, 5);
     });
+
+    test('parses DbUserRecord, ProviderRegistration, DeliveryRecord, and PaymentTransactionRecord', () {
+      final user = DbUserRecord.fromJson({
+        'id': 1,
+        'uid': 'user-123',
+        'firebaseUid': 'fb-123',
+        'fullName': 'Dawit Tadesse',
+        'email': 'dawit@example.com',
+        'defaultSubCity': 'Bole',
+        'roles': ['CUSTOMER', 'PROVIDER'],
+        'providerVerificationStatus': 'VERIFIED',
+      });
+      expect(user.isVerifiedProvider, true);
+      expect(user.isDeliveryPartner, true);
+      expect(user.allUids, {'user-123', 'fb-123'});
+
+      final reg = ProviderRegistration.fromJson({
+        'id': 12,
+        'userUid': 'user-123',
+        'fullName': 'Dawit Tadesse',
+        'phoneNumber': '+251911000000',
+        'serviceCategoryId': 3,
+        'faydaIdNumber': 'FIN-998877',
+        'livenessPassed': true,
+        'livenessScore': 95,
+        'subCity': 'Bole',
+        'landmark': 'Edna Mall',
+        'status': 'VERIFIED',
+        'createdAt': '2026-11-20T10:00:00Z',
+      });
+      expect(reg.status, 'VERIFIED');
+      expect(reg.livenessPassed, true);
+
+      final delivery = DeliveryRecord.fromJson({
+        'id': 55,
+        'trackingCode': 'DEL-55',
+        'requestType': 'DELIVERY',
+        'customerUid': 'user-123',
+        'customerName': 'Dawit',
+        'pickupLocation': 'Bole',
+        'destinationLocation': 'Piassa',
+        'packageOrRideDetails': 'Laptop sleeve',
+        'vehicleType': 'MOTORCYCLE',
+        'urgency': 'STANDARD',
+        'distanceKm': 6.2,
+        'totalFee': 185,
+        'escrowAmount': 185,
+        'paymentMethod': 'CHAPA',
+        'status': 'PICKED_UP',
+        'createdAt': '2026-11-20T10:00:00Z',
+      });
+      expect(delivery.vehicleType, 'MOTORCYCLE');
+      expect(delivery.status, 'PICKED_UP');
+      expect(delivery.totalFee, 185);
+
+      final tx = PaymentTransactionRecord.fromJson({
+        'id': 91,
+        'txRef': 'NY-TX-91',
+        'gateway': 'CHAPA',
+        'gatewayMode': 'LIVE',
+        'transactionType': 'ORDER',
+        'referenceId': 10,
+        'referenceCode': 'ORD-10',
+        'customerUid': 'user-123',
+        'grossAmount': 1150,
+        'providerAmount': 1035,
+        'taxAmount': 150,
+        'providerLegStatus': 'SETTLED',
+        'status': 'PAID',
+        'createdAt': '2026-11-20T10:00:00Z',
+      });
+      expect(tx.isPaid, true);
+      expect(tx.providerAmount, 1035);
+    });
   });
 }

@@ -394,7 +394,7 @@ class _LiveChatSheetState extends State<LiveChatSheet> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  initialValue: contractType,
+                  value: contractType,
                   decoration: const InputDecoration(labelText: 'Contract Type'),
                   items: const [
                     DropdownMenuItem(
@@ -411,7 +411,7 @@ class _LiveChatSheetState extends State<LiveChatSheet> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  initialValue: schedule,
+                  value: schedule,
                   decoration:
                       const InputDecoration(labelText: 'Payment Schedule'),
                   items: const [

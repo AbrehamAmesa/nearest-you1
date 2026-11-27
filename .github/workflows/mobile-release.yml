@@ -33,17 +33,9 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Bootstrap platform tooling & verify
+      - name: Verify Flutter project & run tests
         working-directory: mobile
         run: |
-          cp lib/main.dart /tmp/ny_main.dart
-          cp android/app/src/main/AndroidManifest.xml /tmp/ny_AndroidManifest.xml
-          cp ios/Runner/Info.plist /tmp/ny_Info.plist
-          flutter create --platforms=android,ios --org com.nearestyou --project-name nearest_you_mobile .
-          cp /tmp/ny_main.dart lib/main.dart
-          cp /tmp/ny_AndroidManifest.xml android/app/src/main/AndroidManifest.xml
-          cp /tmp/ny_Info.plist ios/Runner/Info.plist
-          rm -f test/widget_test.dart
           flutter pub get
           flutter analyze --no-fatal-infos
           flutter test
@@ -68,21 +60,16 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Prepare Android project & permissions
+      - name: Ensure Android Gradle wrapper binaries exist
         working-directory: mobile
         run: |
-          cp lib/main.dart /tmp/ny_main.dart
-          cp android/app/src/main/AndroidManifest.xml /tmp/ny_AndroidManifest.xml
-          flutter create --platforms=android --org com.nearestyou --project-name nearest_you_mobile .
-          cp /tmp/ny_main.dart lib/main.dart
-          cp /tmp/ny_AndroidManifest.xml android/app/src/main/AndroidManifest.xml
-          rm -f test/widget_test.dart
-          if [ -f android/app/build.gradle ]; then
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle
-          fi
-          if [ -f android/app/build.gradle.kts ]; then
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle.kts
+          if [ ! -f android/gradlew ] || [ ! -f android/gradle/wrapper/gradle-wrapper.jar ]; then
+            flutter create --platforms=android --org com.nearestyou --project-name nearest_you_mobile /tmp/ny_android_tpl
+            cp -n /tmp/ny_android_tpl/android/gradlew android/gradlew || true
+            cp -n /tmp/ny_android_tpl/android/gradlew.bat android/gradlew.bat || true
+            mkdir -p android/gradle/wrapper
+            cp -n /tmp/ny_android_tpl/android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.jar || true
+            chmod +x android/gradlew
           fi
 
       - name: Configure Android release signing (if secrets provided)
@@ -103,7 +90,7 @@ jobs:
           EOF
             echo "Keystore configured for release signing."
           else
-            echo "No ANDROID_KEYSTORE_BASE64 secret set; building with Flutter default signing."
+            echo "No ANDROID_KEYSTORE_BASE64 secret set; building with fallback signing."
           fi
 
       - name: Build Android APK & AppBundle
@@ -148,22 +135,11 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Prepare iOS project & permissions
+      - name: Fetch Flutter & CocoaPods dependencies
         working-directory: mobile
         run: |
-          cp lib/main.dart /tmp/ny_main.dart
-          cp ios/Runner/Info.plist /tmp/ny_Info.plist
-          flutter create --platforms=ios --org com.nearestyou --project-name nearest_you_mobile .
-          cp /tmp/ny_main.dart lib/main.dart
-          cp /tmp/ny_Info.plist ios/Runner/Info.plist
-          rm -f test/widget_test.dart
-          if [ -f ios/Podfile ]; then
-            sed -i '' "s/# platform :ios, '12.0'/platform :ios, '13.0'/g" ios/Podfile || true
-            sed -i '' "s/platform :ios, '12.0'/platform :ios, '13.0'/g" ios/Podfile || true
-          else
-            echo "platform :ios, '13.0'" > ios/Podfile
-          fi
           flutter pub get
+          cd ios && pod install && cd ..
 
       - name: Build signed IPA (if Apple signing secrets provided) or unsigned IPA
         working-directory: mobile

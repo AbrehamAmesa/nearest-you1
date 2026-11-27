@@ -387,12 +387,19 @@ class AppState extends ChangeNotifier {
       myDeliveries = ((wsData['deliveries'] as List?) ?? const [])
           .map((e) => DeliveryRecord.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
-      myApplications = ((wsData['jobApplications'] as List?) ?? const [])
+      final rawApps =
+          (wsData['applications'] ?? wsData['jobApplications']) as List? ??
+              const [];
+      myApplications = rawApps
           .map((e) =>
               JobApplicationRecord.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
-      favoriteIds = ((wsData['favoriteIds'] as List?) ?? const [])
-          .map((e) => parseInt(e))
+      final rawFavs =
+          (wsData['favorites'] ?? wsData['favoriteIds']) as List? ?? const [];
+      favoriteIds = rawFavs
+          .map((e) => e is Map ? parseInt(e['listingId']) : parseInt(e))
+          .where((id) => id > 0)
+          .toSet()
           .toList();
     } catch (_) {}
     await Future.wait([
@@ -515,9 +522,11 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
     try {
-      final serverFavs = await api.toggleFavorite(listingId);
-      if (serverFavs.isNotEmpty) {
-        favoriteIds = serverFavs;
+      final saved = await api.toggleFavorite(listingId);
+      if (saved == true && !favoriteIds.contains(listingId)) {
+        favoriteIds.add(listingId);
+      } else if (saved == false) {
+        favoriteIds.remove(listingId);
       }
       notifyListeners();
     } catch (_) {}

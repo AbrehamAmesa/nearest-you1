@@ -23,7 +23,7 @@ class _DeliveryScreenState extends State<DeliveryScreen>
 
   // Request tab
   String _requestType = 'DELIVERY';
-  String _vehicleType = 'MOTORBIKE';
+  String _vehicleType = 'MOTORCYCLE';
   String _urgency = 'STANDARD';
   String _paymentMethod = 'CHAPA';
   double _pickupLat = 9.0192;
@@ -46,6 +46,7 @@ class _DeliveryScreenState extends State<DeliveryScreen>
   final _declaredValueCtrl = TextEditingController(text: '1000');
 
   List<OsmPlaceResult> _searchResults = [];
+  List<KnownLocationRecord> _knownLocations = [];
   bool _searchingPickup = true;
 
   // Track Live tab
@@ -65,6 +66,14 @@ class _DeliveryScreenState extends State<DeliveryScreen>
     super.initState();
     _tabCtrl = TabController(length: 3, vsync: this);
     _recalculateRoute();
+    _loadKnownLocations();
+  }
+
+  Future<void> _loadKnownLocations() async {
+    try {
+      final locs = await context.read<AppState>().api.getKnownLocations();
+      if (mounted) setState(() => _knownLocations = locs);
+    } catch (_) {}
   }
 
   @override
@@ -142,11 +151,13 @@ class _DeliveryScreenState extends State<DeliveryScreen>
   double _estimatedFare(PlatformPolicy p) {
     final base = _requestType == 'RIDE' ? p.rideBaseFare : p.deliveryBaseFee;
     final perKm = _requestType == 'RIDE' ? p.ridePerKmRate : p.deliveryPerKmRate;
-    final vehicleMult = _vehicleType == 'VAN'
-        ? 1.8
-        : (_vehicleType == 'CAR' ? 1.35 : 1.0);
+    final vehicleMult = _vehicleType == 'TRUCK'
+        ? 2.2
+        : (_vehicleType == 'VAN'
+            ? 1.6
+            : (_vehicleType == 'CAR' ? 1.25 : 1.0));
     final urgMult = _urgency == 'EXPRESS' ? p.expressMultiplier : 1.0;
-    final sub = (base + _distanceKm * perKm) * vehicleMult * urgMult;
+    final sub = base + (_distanceKm * perKm * vehicleMult * urgMult);
     final vat = sub * (p.taxRatePercent / 100.0);
     return (sub + vat).roundToDouble();
   }
@@ -276,7 +287,8 @@ class _DeliveryScreenState extends State<DeliveryScreen>
       final ok = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text('Enter ${nextStatus == 'IN_TRANSIT' ? 'Pickup' : 'Receiver'} OTP'),
+          title: Text(
+              'Enter ${nextStatus == 'PICKED_UP' ? 'Sender Pickup' : 'Receiver Delivery'} OTP'),
           content: TextField(
             controller: ctrl,
             keyboardType: TextInputType.number,
@@ -511,6 +523,39 @@ class _DeliveryScreenState extends State<DeliveryScreen>
             ),
           ],
         ),
+        if (_knownLocations.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _knownLocations.take(12).length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (_, i) {
+                final loc = _knownLocations[i];
+                return ActionChip(
+                  label: Text(loc.name, style: const TextStyle(fontSize: 11.5)),
+                  onPressed: () {
+                    setState(() {
+                      if (_pinTargetIsPickup) {
+                        _pickupLat = loc.latitude;
+                        _pickupLng = loc.longitude;
+                        _pickupLabel = '${loc.name}, ${loc.subCity}';
+                        _pickupSearchCtrl.text = _pickupLabel;
+                      } else {
+                        _destLat = loc.latitude;
+                        _destLng = loc.longitude;
+                        _destLabel = '${loc.name}, ${loc.subCity}';
+                        _destSearchCtrl.text = _destLabel;
+                      }
+                    });
+                    _recalculateRoute();
+                  },
+                );
+              },
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         TextField(
           controller: _pickupSearchCtrl,
@@ -593,21 +638,22 @@ class _DeliveryScreenState extends State<DeliveryScreen>
           children: [
             Expanded(
               child: DropdownButtonFormField<String>(
-                initialValue: _vehicleType,
+                value: _vehicleType,
                 decoration: const InputDecoration(labelText: 'Vehicle'),
                 items: const [
-                  DropdownMenuItem(value: 'MOTORBIKE', child: Text('Motorbike')),
+                  DropdownMenuItem(value: 'MOTORCYCLE', child: Text('Motorcycle')),
                   DropdownMenuItem(value: 'CAR', child: Text('Car')),
-                  DropdownMenuItem(value: 'VAN', child: Text('Van / Truck')),
+                  DropdownMenuItem(value: 'VAN', child: Text('Van')),
+                  DropdownMenuItem(value: 'TRUCK', child: Text('Truck')),
                 ],
                 onChanged: (v) =>
-                    setState(() => _vehicleType = v ?? 'MOTORBIKE'),
+                    setState(() => _vehicleType = v ?? 'MOTORCYCLE'),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: DropdownButtonFormField<String>(
-                initialValue: _urgency,
+                value: _urgency,
                 decoration: const InputDecoration(labelText: 'Priority'),
                 items: const [
                   DropdownMenuItem(value: 'STANDARD', child: Text('Standard')),
@@ -620,7 +666,7 @@ class _DeliveryScreenState extends State<DeliveryScreen>
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          initialValue: _paymentMethod,
+          value: _paymentMethod,
           decoration: const InputDecoration(labelText: 'Payment Method'),
           items: const [
             DropdownMenuItem(value: 'CHAPA', child: Text('Chapa (Escrow)')),
@@ -752,7 +798,7 @@ class _DeliveryScreenState extends State<DeliveryScreen>
                       style: const TextStyle(fontSize: 12.5)),
                   const SizedBox(height: 6),
                   Text(
-                    'Total: ${AppConfig.formatEtb(d.totalFee)} · Escrow: ${d.escrowStatus ?? 'N/A'}',
+                    'Total: ${AppConfig.formatEtb(d.totalFee > 0 ? d.totalFee : d.escrowAmount)} · Escrow: ${d.escrowStatus ?? 'N/A'}',
                     style: const TextStyle(
                         fontWeight: FontWeight.w700, color: AppTheme.primary),
                   ),
@@ -789,7 +835,9 @@ class _DeliveryScreenState extends State<DeliveryScreen>
                         icon: const Icon(Icons.receipt_long_rounded, size: 17),
                         label: Text(app.t('open_payment_details')),
                       ),
-                      if (d.status != 'DELIVERED' && d.status != 'DISPUTED')
+                      if (d.status != 'COMPLETED' &&
+                          d.status != 'CANCELLED' &&
+                          d.status != 'DISPUTED')
                         OutlinedButton.icon(
                           onPressed: () => _raiseDisputeOrConflict(d),
                           icon: const Icon(Icons.gavel_rounded,
@@ -901,16 +949,16 @@ class _DeliveryScreenState extends State<DeliveryScreen>
                             ElevatedButton(
                               onPressed: () => _partnerTransition(
                                 d,
-                                'IN_TRANSIT',
+                                'PICKED_UP',
                                 needsOtp: d.pickupOtpRequired,
                               ),
                               child: const Text('Confirm Pickup (OTP)'),
                             ),
-                          if (isMine && d.status == 'IN_TRANSIT')
+                          if (isMine && d.status == 'PICKED_UP')
                             ElevatedButton(
                               onPressed: () => _partnerTransition(
                                 d,
-                                'DELIVERED',
+                                'COMPLETED',
                                 needsOtp: d.deliveryOtpRequired,
                               ),
                               child: const Text('Complete Dropoff (OTP)'),

@@ -11,16 +11,28 @@ Admin features and platform commission configuration are **excluded** from the m
 - **Activity & Real-Time Engagement**: Orders, Bookings (including quote approval), Deliveries, Job Applications, Favorites, WebSocket live chat, **automatic voice message recording & playback**, and interactive Service Contracts.
 - **Business & Provider Portal**: Fayda KYC + biometric selfie + document uploads, Peer QR voucher generation & **Camera QR Scanner** vouching, Business registration, Chapa/Payo payout setup, Listing publisher with mandatory Seller vs. Buyer tax confirmation, incoming order ETA acceptance, and provider settlement receipts.
 
-## Local Development
+## Local Development & Builds
+The Android (`mobile/android`) and iOS (`mobile/ios`) project configurations are included directly in this repository.
+
 ```bash
 cd mobile
-flutter create --platforms=android,ios --org com.nearestyou --project-name nearest_you_mobile .
-# Restore platform permissions if needed:
-# git checkout android/app/src/main/AndroidManifest.xml ios/Runner/Info.plist
 flutter pub get
+flutter analyze --no-fatal-infos
+flutter test
+
+# Run locally on connected device or emulator
 flutter run --dart-define=API_BASE_URL=https://your-backend.example.com
+
+# Build Android APK (release)
+flutter build apk --release --dart-define=API_BASE_URL=https://your-backend.example.com
+
+# Build iOS app (macOS with Xcode & CocoaPods required)
+cd ios && pod install && cd ..
+flutter build ios --release --no-codesign --dart-define=API_BASE_URL=https://your-backend.example.com
 ```
 You can also update the Backend Server URL anytime inside the app under **Sign In -> Server URL** or **Account -> Server Connection**.
+
+If `android/gradlew` is missing on a fresh clone, run `flutter build apk --release` (Flutter generates local Gradle tooling) or copy the Gradle wrapper once via `flutter create --platforms=android .` without overwriting custom configs.
 
 ## GitHub Release Automation (Android & iOS)
 Workflow: `.github/workflows/mobile-release.yml`

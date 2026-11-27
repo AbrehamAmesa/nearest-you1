@@ -221,7 +221,7 @@ class _JobSeekerAdvertiseSheetState extends State<JobSeekerAdvertiseSheet> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    initialValue: _pricingModel,
+                    value: _pricingModel,
                     decoration:
                         const InputDecoration(labelText: 'Rate Structure'),
                     items: const [
@@ -260,7 +260,7 @@ class _JobSeekerAdvertiseSheetState extends State<JobSeekerAdvertiseSheet> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    initialValue: _subCity,
+                    value: _subCity,
                     decoration: const InputDecoration(labelText: 'Sub-City'),
                     items: AppConfig.addisSubCities
                         .map((s) => DropdownMenuItem(value: s, child: Text(s)))

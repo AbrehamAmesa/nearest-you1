@@ -370,7 +370,7 @@ class _PaymentGatewaySheetState extends State<PaymentGatewaySheet> {
       decoration: BoxDecoration(
         color: AppTheme.primaryLight,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.4)),
+        border: Border.all(color: AppTheme.primary.withAlpha(102)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

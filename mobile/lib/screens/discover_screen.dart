@@ -125,7 +125,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                         TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  initialValue: _sortBy,
+                  value: _sortBy,
                   decoration: const InputDecoration(labelText: 'Sort Order'),
                   items: const [
                     DropdownMenuItem(
@@ -146,7 +146,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<double?>(
-                  initialValue: _radiusKm,
+                  value: _radiusKm,
                   decoration: const InputDecoration(labelText: 'Max Distance'),
                   items: const [
                     DropdownMenuItem(value: null, child: Text('All Addis Ababa')),
@@ -162,7 +162,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  initialValue: _listingTypeFilter,
+                  value: _listingTypeFilter,
                   decoration: const InputDecoration(labelText: 'Listing Type'),
                   items: const [
                     DropdownMenuItem(value: 'ALL', child: Text('All Types')),

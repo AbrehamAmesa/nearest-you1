@@ -412,7 +412,7 @@ class _CartSheetState extends State<CartSheet> {
                     ],
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
-                      initialValue: _paymentMethod,
+                      value: _paymentMethod,
                       decoration:
                           const InputDecoration(labelText: 'Payment Method'),
                       items: const [

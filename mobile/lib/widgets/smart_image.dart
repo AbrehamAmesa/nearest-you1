@@ -76,7 +76,7 @@ class SmartImage extends StatelessWidget {
       alignment: Alignment.center,
       child: Icon(
         fallbackIcon,
-        color: AppTheme.primary.withValues(alpha: 0.65),
+        color: AppTheme.primary.withAlpha(166),
         size: 30,
       ),
     );

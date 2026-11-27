@@ -57,6 +57,7 @@ class _BusinessScreenState extends State<BusinessScreen>
       _error = null;
     });
     try {
+      await app.loadCatalog(silent: true);
       final portal = await app.api.getBusinessPortal();
       final provMe = await app.api.getProviderMe();
       final banks = await app.api.getBanks();
@@ -70,18 +71,33 @@ class _BusinessScreenState extends State<BusinessScreen>
       } catch (_) {}
 
       if (!mounted) return;
+      ProviderRegistration? parsedReg;
+      final rawReg = provMe['registration'];
+      if (rawReg is Map) {
+        final outer = Map<String, dynamic>.from(rawReg);
+        final inner = outer['registration'] is Map
+            ? Map<String, dynamic>.from(outer['registration'] as Map)
+            : outer;
+        parsedReg = ProviderRegistration.fromJson(inner);
+      }
+      final parsedBusinesses =
+          ((portal['ownedBusinesses'] ?? portal['businesses']) as List? ??
+                  const [])
+              .map((e) => Business.fromJson(Map<String, dynamic>.from(e as Map)))
+              .toList();
+      final ownedBizIds = parsedBusinesses.map((b) => b.id).toSet();
+      final portalListings = (portal['listings'] as List?)
+              ?.map((e) => Listing.fromJson(Map<String, dynamic>.from(e as Map)))
+              .toList() ??
+          app.listings
+              .where((l) => ownedBizIds.contains(l.businessId))
+              .toList();
+
       setState(() {
-        _providerReg = provMe['registration'] is Map
-            ? ProviderRegistration.fromJson(
-                Map<String, dynamic>.from(provMe['registration'] as Map))
-            : null;
+        _providerReg = parsedReg;
         _pendingApprovals = approvals;
-        _myBusinesses = ((portal['businesses'] as List?) ?? const [])
-            .map((e) => Business.fromJson(Map<String, dynamic>.from(e as Map)))
-            .toList();
-        _myListings = ((portal['listings'] as List?) ?? const [])
-            .map((e) => Listing.fromJson(Map<String, dynamic>.from(e as Map)))
-            .toList();
+        _myBusinesses = parsedBusinesses;
+        _myListings = portalListings;
         _incomingOrders = ((portal['orders'] as List?) ?? const [])
             .map((e) => OrderRecord.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList();
@@ -90,7 +106,8 @@ class _BusinessScreenState extends State<BusinessScreen>
                 BookingRecord.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList();
         _incomingApplications =
-            ((portal['jobApplications'] as List?) ?? const [])
+            ((portal['applications'] ?? portal['jobApplications']) as List? ??
+                    const [])
                 .map((e) => JobApplicationRecord.fromJson(
                     Map<String, dynamic>.from(e as Map)))
                 .toList();
@@ -175,7 +192,7 @@ class _BusinessScreenState extends State<BusinessScreen>
                   const SizedBox(height: 8),
                   if (app.categories.isNotEmpty)
                     DropdownButtonFormField<int>(
-                      initialValue: catId,
+                      value: catId,
                       decoration:
                           const InputDecoration(labelText: 'Primary Category *'),
                       items: app.categories
@@ -197,7 +214,7 @@ class _BusinessScreenState extends State<BusinessScreen>
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: subCity,
+                          value: subCity,
                           decoration:
                               const InputDecoration(labelText: 'Sub-City *'),
                           items: AppConfig.addisSubCities
@@ -438,7 +455,7 @@ class _BusinessScreenState extends State<BusinessScreen>
                 const SizedBox(height: 8),
                 if (app.categories.isNotEmpty)
                   DropdownButtonFormField<int>(
-                    initialValue: catId,
+                    value: catId,
                     decoration: const InputDecoration(labelText: 'Category *'),
                     items: app.categories
                         .map((c) => DropdownMenuItem(
@@ -467,7 +484,7 @@ class _BusinessScreenState extends State<BusinessScreen>
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: subCity,
+                  value: subCity,
                   decoration: const InputDecoration(labelText: 'Sub-City *'),
                   items: AppConfig.addisSubCities
                       .map((s) => DropdownMenuItem(value: s, child: Text(s)))
@@ -552,7 +569,7 @@ class _BusinessScreenState extends State<BusinessScreen>
               children: [
                 if (_banks.isNotEmpty)
                   DropdownButtonFormField<String>(
-                    initialValue: _banks.any((bk) => bk.code == bankCode)
+                    value: _banks.any((bk) => bk.code == bankCode)
                         ? bankCode
                         : null,
                     decoration: const InputDecoration(labelText: 'Bank'),
@@ -588,7 +605,7 @@ class _BusinessScreenState extends State<BusinessScreen>
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: gateway,
+                  value: gateway,
                   decoration:
                       const InputDecoration(labelText: 'Preferred Gateway'),
                   items: const [
@@ -691,7 +708,7 @@ class _BusinessScreenState extends State<BusinessScreen>
                 const SizedBox(height: 10),
                 if (existing == null)
                   DropdownButtonFormField<int>(
-                    initialValue: bizId,
+                    value: bizId,
                     decoration: const InputDecoration(labelText: 'Business'),
                     items: _myBusinesses
                         .map((b) => DropdownMenuItem(
@@ -699,11 +716,17 @@ class _BusinessScreenState extends State<BusinessScreen>
                         .toList(),
                     onChanged: (v) => setSheet(() {
                       bizId = v ?? bizId;
+                      final match = _myBusinesses
+                          .where((b) => b.id == bizId)
+                          .toList();
+                      if (match.isNotEmpty) {
+                        catId = match.first.categoryId;
+                      }
                     }),
                   ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: listingType,
+                  value: listingType,
                   decoration: const InputDecoration(labelText: 'Listing Type'),
                   items: const [
                     DropdownMenuItem(value: 'PRODUCT', child: Text('Product')),
@@ -732,7 +755,7 @@ class _BusinessScreenState extends State<BusinessScreen>
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        initialValue: pricingModel,
+                        value: pricingModel,
                         decoration:
                             const InputDecoration(labelText: 'Pricing Model'),
                         items: const [

@@ -628,7 +628,7 @@ class _ListingDetailSheetState extends State<ListingDetailSheet> {
               ],
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                initialValue: _paymentMethod,
+                value: _paymentMethod,
                 decoration: const InputDecoration(labelText: 'Payment Method'),
                 items: const [
                   DropdownMenuItem(value: 'CHAPA', child: Text('Chapa')),

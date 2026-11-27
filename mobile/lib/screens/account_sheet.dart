@@ -293,7 +293,7 @@ class _AccountSheetState extends State<AccountSheet> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                initialValue: _subCity,
+                value: _subCity,
                 decoration: const InputDecoration(labelText: 'Default Sub-City'),
                 items: AppConfig.addisSubCities
                     .map((s) => DropdownMenuItem(value: s, child: Text(s)))
@@ -311,7 +311,7 @@ class _AccountSheetState extends State<AccountSheet> {
               const SizedBox(height: 10),
               if (_banks.isNotEmpty)
                 DropdownButtonFormField<String>(
-                  initialValue: _banks.any((b) => b.code == _bankCode)
+                  value: _banks.any((b) => b.code == _bankCode)
                       ? _bankCode
                       : null,
                   decoration: const InputDecoration(labelText: 'Ethiopian Bank'),
@@ -345,7 +345,7 @@ class _AccountSheetState extends State<AccountSheet> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                initialValue: _preferredGateway,
+                value: _preferredGateway,
                 decoration:
                     const InputDecoration(labelText: 'Preferred Payout Gateway'),
                 items: const [

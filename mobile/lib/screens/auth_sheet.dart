@@ -215,7 +215,7 @@ class _AuthSheetState extends State<AuthSheet> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                initialValue: _subCity,
+                value: _subCity,
                 decoration: const InputDecoration(
                   labelText: 'Default Addis Ababa Sub-City',
                   prefixIcon: Icon(Icons.location_city_outlined),
