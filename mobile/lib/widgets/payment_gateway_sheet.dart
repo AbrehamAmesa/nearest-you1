@@ -102,6 +102,7 @@ class _PaymentGatewaySheetState extends State<PaymentGatewaySheet> {
         gateway: _selectedGateway,
         transactionType: widget.transactionType,
         referenceId: widget.referenceId,
+        returnUrl: AppConfig.publicAppBaseUrl,
         customerEmail: app.currentUser?.email,
         phoneNumber: app.currentUser?.phoneNumber,
       );
@@ -130,9 +131,17 @@ class _PaymentGatewaySheetState extends State<PaymentGatewaySheet> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onNavigationRequest: (req) {
-            if (req.url.contains('chapa/callback') ||
+            final isReturnRedirect = req.url.contains('paymentTxRef=') ||
+                req.url.startsWith(AppConfig.publicAppBaseUrl);
+            if (isReturnRedirect ||
+                req.url.contains('chapa/callback') ||
                 req.url.contains('status=success')) {
-              _verifyChapa();
+              if (!_verifying && _tx != null && !_tx!.isPaid) {
+                _verifyChapa();
+              }
+              if (isReturnRedirect) {
+                return NavigationDecision.prevent;
+              }
             }
             return NavigationDecision.navigate;
           },

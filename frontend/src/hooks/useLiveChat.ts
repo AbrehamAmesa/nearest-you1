@@ -17,7 +17,9 @@ function buildWebSocketUrl(token: string): string {
     configuredBase && /^https?:\/\//i.test(configuredBase)
       ? configuredBase.replace(/\/+$/, '')
       : typeof window !== 'undefined'
-        ? window.location.origin
+        ? (window.location.hostname.endsWith('vercel.app')
+            ? 'https://nearest-you-backend.onrender.com'
+            : window.location.origin)
         : 'http://localhost:3000';
   const wsBase = httpBase.replace(/^http/i, 'ws');
   return `${wsBase}/api/v1/ws/chat?token=${encodeURIComponent(token)}`;

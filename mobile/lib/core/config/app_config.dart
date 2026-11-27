@@ -5,7 +5,12 @@ class AppConfig {
   /// and overridable at runtime from Account -> Server URL settings.
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8080',
+    defaultValue: 'https://nearest-you-backend.onrender.com',
+  );
+
+  static const String publicAppBaseUrl = String.fromEnvironment(
+    'APP_BASE_URL',
+    defaultValue: 'https://nearest-you.vercel.app',
   );
 
   static const double addisCenterLat = 9.0192;

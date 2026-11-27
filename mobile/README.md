@@ -20,15 +20,15 @@ flutter pub get
 flutter analyze --no-fatal-infos
 flutter test
 
-# Run locally on connected device or emulator
-flutter run --dart-define=API_BASE_URL=https://your-backend.example.com
+# Run locally on connected device or emulator (defaults to https://nearest-you-backend.onrender.com)
+flutter run --dart-define=API_BASE_URL=https://nearest-you-backend.onrender.com
 
 # Build Android APK (release)
-flutter build apk --release --dart-define=API_BASE_URL=https://your-backend.example.com
+flutter build apk --release --dart-define=API_BASE_URL=https://nearest-you-backend.onrender.com --dart-define=APP_BASE_URL=https://nearest-you.vercel.app
 
 # Build iOS app (macOS with Xcode & CocoaPods required)
 cd ios && pod install && cd ..
-flutter build ios --release --no-codesign --dart-define=API_BASE_URL=https://your-backend.example.com
+flutter build ios --release --no-codesign --dart-define=API_BASE_URL=https://nearest-you-backend.onrender.com --dart-define=APP_BASE_URL=https://nearest-you.vercel.app
 ```
 You can also update the Backend Server URL anytime inside the app under **Sign In -> Server URL** or **Account -> Server Connection**.
 
@@ -37,18 +37,19 @@ If `android/gradlew` is missing on a fresh clone, run `flutter build apk --relea
 ## GitHub Release Automation (Android & iOS)
 Workflow: `.github/workflows/mobile-release.yml`
 
-Trigger a release by either:
-1. Pushing a tag:
+Releases are built and attached automatically (`nearest-you-android.apk`, `nearest-you-android.aab`, `nearest-you-ios-unsigned.ipa` or signed `nearest-you-ios.ipa`, and `SHA256SUMS.txt`) when:
+1. Changes in `mobile/` or `.github/workflows/mobile-release.yml` are pushed to `main` / `master`.
+2. A tag matching `mobile-v*` or `v*` is pushed:
    ```bash
    git tag mobile-v1.0.0
    git push origin mobile-v1.0.0
    ```
-2. Running **Actions -> Nearest You Mobile Release (Android & iOS) -> Run workflow** in GitHub.
+3. You manually run **Actions -> Nearest You Mobile Release (Android & iOS) -> Run workflow** in GitHub.
 
 ### Optional Repository Variables & Secrets
 - **Repository Variable**:
-  - `API_BASE_URL`: Production Spring Boot backend URL (e.g. `https://api.nearestyou.et`).
-- **Android Play Store Signing Secrets** (optional; falls back to Flutter default signing if omitted):
+  - `API_BASE_URL`: Production Spring Boot backend URL (defaults to `https://nearest-you-backend.onrender.com`).
+- **Android Play Store Signing Secrets** (optional; falls back to fallback release signing if omitted):
   - `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
 - **iOS App Store / AdHoc Signing Secrets** (optional; produces `nearest-you-ios-unsigned.ipa` if omitted):
   - `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`, `IOS_EXPORT_OPTIONS_PLIST`

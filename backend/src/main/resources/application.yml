@@ -40,8 +40,8 @@ nearestyou:
     api-key: ${GEMINI_API_KEY:}
 
   payments:
-    public-app-base-url: ${PUBLIC_APP_BASE_URL:http://localhost:3000}
-    public-api-base-url: ${PUBLIC_API_BASE_URL:http://localhost:8080}
+    public-app-base-url: ${PUBLIC_APP_BASE_URL:https://nearest-you.vercel.app}
+    public-api-base-url: ${PUBLIC_API_BASE_URL:https://nearest-you-backend.onrender.com}
 
     chapa:
       base-url: ${CHAPA_BASE_URL:https://api.chapa.co/v1}

@@ -78,10 +78,10 @@ public class PaymentGatewayService {
     private volatile List<Map<String, String>> cachedBanks = DEFAULT_ETHIOPIAN_BANKS;
     private volatile long banksCacheExpiresAtMs = 0L;
 
-    @Value("${nearestyou.payments.public-app-base-url:http://localhost:3000}")
+    @Value("${nearestyou.payments.public-app-base-url:https://nearest-you.vercel.app}")
     private String publicAppBaseUrl;
 
-    @Value("${nearestyou.payments.public-api-base-url:http://localhost:8080}")
+    @Value("${nearestyou.payments.public-api-base-url:https://nearest-you-backend.onrender.com}")
     private String publicApiBaseUrl;
 
     @Value("${nearestyou.payments.chapa.base-url:https://api.chapa.co/v1}")
@@ -157,12 +157,16 @@ public class PaymentGatewayService {
     }
 
     private String cleanPublicBaseUrl(String overrideUrl) {
-        String base = (publicAppBaseUrl != null && !publicAppBaseUrl.isBlank()) ? publicAppBaseUrl.trim() : "http://localhost:3000";
+        String base = (overrideUrl != null && !overrideUrl.isBlank())
+                ? overrideUrl.trim()
+                : ((publicAppBaseUrl != null && !publicAppBaseUrl.isBlank())
+                        ? publicAppBaseUrl.trim()
+                        : "https://nearest-you.vercel.app");
         return base.replaceAll("/+$", "");
     }
 
     private String cleanPublicApiBaseUrl() {
-        String base = (publicApiBaseUrl != null && !publicApiBaseUrl.isBlank()) ? publicApiBaseUrl.trim() : "http://localhost:8080";
+        String base = (publicApiBaseUrl != null && !publicApiBaseUrl.isBlank()) ? publicApiBaseUrl.trim() : "https://nearest-you-backend.onrender.com";
         return base.replaceAll("/+$", "");
     }
 

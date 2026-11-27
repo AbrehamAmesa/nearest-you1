@@ -5,8 +5,13 @@ export const setApiTokenProvider = (provider: () => Promise<string | null>) => {
   tokenProvider = provider;
 };
 
+const defaultVercelApiBase =
+  typeof window !== 'undefined' && window.location.hostname.endsWith('vercel.app')
+    ? 'https://nearest-you-backend.onrender.com'
+    : '';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '',
+  baseURL: (import.meta.env.VITE_API_BASE_URL || defaultVercelApiBase).replace(/\/+$/, ''),
   headers: { 'Content-Type': 'application/json' },
   timeout: 90000,
 });

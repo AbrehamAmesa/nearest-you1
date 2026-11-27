@@ -2,6 +2,12 @@ name: Nearest You Mobile Release (Android & iOS)
 
 on:
   push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-release.yml'
     tags:
       - 'mobile-v*'
       - 'v*'
@@ -12,9 +18,9 @@ on:
         required: true
         default: 'mobile-v1.0.0'
       api_base_url:
-        description: 'Backend API Base URL baked into build (overrides repo var API_BASE_URL)'
+        description: 'Backend API Base URL baked into build'
         required: false
-        default: ''
+        default: 'https://nearest-you-backend.onrender.com'
 
 permissions:
   contents: write
@@ -99,14 +105,10 @@ jobs:
           INPUT_API_URL: ${{ github.event.inputs.api_base_url }}
           VAR_API_URL: ${{ vars.API_BASE_URL }}
         run: |
-          API_URL="${INPUT_API_URL:-$VAR_API_URL}"
-          DART_DEFINES=""
-          if [ -n "$API_URL" ]; then
-            DART_DEFINES="--dart-define=API_BASE_URL=$API_URL"
-          fi
+          API_URL="${INPUT_API_URL:-${VAR_API_URL:-https://nearest-you-backend.onrender.com}}"
           flutter pub get
-          flutter build apk --release $DART_DEFINES
-          flutter build appbundle --release $DART_DEFINES
+          flutter build apk --release --dart-define=API_BASE_URL="$API_URL" --dart-define=APP_BASE_URL=https://nearest-you.vercel.app
+          flutter build appbundle --release --dart-define=API_BASE_URL="$API_URL" --dart-define=APP_BASE_URL=https://nearest-you.vercel.app
 
       - name: Prepare Android release artifacts
         working-directory: mobile
@@ -151,11 +153,7 @@ jobs:
           IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
           IOS_EXPORT_OPTIONS_PLIST: ${{ secrets.IOS_EXPORT_OPTIONS_PLIST }}
         run: |
-          API_URL="${INPUT_API_URL:-$VAR_API_URL}"
-          DART_DEFINES=""
-          if [ -n "$API_URL" ]; then
-            DART_DEFINES="--dart-define=API_BASE_URL=$API_URL"
-          fi
+          API_URL="${INPUT_API_URL:-${VAR_API_URL:-https://nearest-you-backend.onrender.com}}"
           mkdir -p ../release-artifacts
 
           if [ -n "$IOS_CERTIFICATE_BASE64" ] && [ -n "$IOS_PROVISIONING_PROFILE_BASE64" ]; then
@@ -172,11 +170,11 @@ jobs:
             echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
 
             echo "$IOS_EXPORT_OPTIONS_PLIST" | base64 --decode > "$RUNNER_TEMP/ExportOptions.plist"
-            flutter build ipa --release $DART_DEFINES --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"
+            flutter build ipa --release --dart-define=API_BASE_URL="$API_URL" --dart-define=APP_BASE_URL=https://nearest-you.vercel.app --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"
             cp build/ios/ipa/*.ipa ../release-artifacts/nearest-you-ios.ipa
           else
             echo "No Apple code-signing secrets configured; building unsigned iOS .ipa archive."
-            flutter build ios --release --no-codesign $DART_DEFINES
+            flutter build ios --release --no-codesign --dart-define=API_BASE_URL="$API_URL" --dart-define=APP_BASE_URL=https://nearest-you.vercel.app
             mkdir -p build/ios/ipa/Payload
             cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/Runner.app
             (cd build/ios/ipa && zip -r ../../../release-artifacts/nearest-you-ios-unsigned.ipa Payload)
@@ -214,14 +212,17 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "tag_name=${{ github.event.inputs.version_name }}" >> $GITHUB_OUTPUT
-          else
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "tag_name=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          else
+            echo "tag_name=mobile-v1.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
           name: "Nearest You Mobile ${{ steps.tag.outputs.tag_name }}"
           generate_release_notes: true
           files: artifacts/*
